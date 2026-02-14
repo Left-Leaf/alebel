@@ -10,6 +10,7 @@ import '../presentation/layers/background_layer.dart';
 import '../presentation/components/cell_component.dart';
 import '../presentation/layers/fog_layer.dart';
 import '../presentation/layers/grid_layer.dart';
+import '../presentation/layers/isometric_world.dart';
 import '../presentation/components/origin_point.dart';
 import '../presentation/layers/range_layer.dart';
 import '../presentation/ui/selection_overlay.dart';
@@ -29,6 +30,13 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
   late final FogLayer fogLayer;
   late GameMap gameMap;
   late final TurnManager turnManager;
+  late final IsometricWorld isoWorld;
+
+  /// 等距变换后的包围盒大小（用于相机限制和背景）
+  late final Vector2 _isoBBSize;
+
+  /// 世界中心点（等距包围盒的中心）
+  late final Vector2 _worldCenter;
 
   // 交互状态
   CellComponent? _hoveredCell;
@@ -67,47 +75,57 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
     turnManager = TurnManager();
     gameMap = GameMap.standard();
 
-    // 计算网格和边界的偏移量
+    // 计算网格和边界的偏移量（在 IsometricWorld 内部的本地坐标）
     final boardOffset = Vector2(borderWidth, borderWidth);
 
-    // 设置相机锚点
+    // 原始棋盘尺寸（含边界）
+    final originalW = gameMap.width * CellComponent.cellSize + borderWidth * 2;
+    final originalH = gameMap.height * CellComponent.cellSize + borderWidth * 2;
+
+    // 计算等距变换后的包围盒
+    _isoBBSize = IsometricWorld.computeBoundingBoxSize(originalW, originalH);
+    _worldCenter = _isoBBSize / 2;
+
+    // 设置相机锚点，对准包围盒中心
     camera.viewfinder.anchor = Anchor.center;
-    // 将相机中心移动到棋盘中心（包括边界）
-    // 棋盘中心 = 边界偏移 + 网格中心
-    camera.viewfinder.position =
-        boardOffset +
-        Vector2(
-          gameMap.width * CellComponent.cellSize / 2,
-          gameMap.height * CellComponent.cellSize / 2,
-        );
+    camera.viewfinder.position = _worldCenter.clone();
 
-    // 添加背景层（最底层）
-    // 背景层覆盖整个区域（边界 + 网格）
-    // 背景层不需要偏移，因为它从 (0,0) 开始绘制，大小包含边界
-    world.add(BackgroundLayer());
+    // 添加背景层（最底层，不参与等距变换）
+    // 背景层大小 = 等距变换后的包围盒大小，从 (0,0) 铺满
+    world.add(BackgroundLayer(bgSize: _isoBBSize.clone()));
 
-    // 添加网格层
+    // 创建等距世界包装器
+    // 所有游戏层（除背景和 UI）都作为其子组件，自动获得等距变换
+    isoWorld = IsometricWorld(
+      boardWidth: originalW,
+      boardHeight: originalH,
+      worldCenter: _worldCenter.clone(),
+    );
+
+    // 添加网格层（在 IsometricWorld 内部）
     gridLayer = GridLayer()..position = boardOffset;
-    world.add(gridLayer);
+    isoWorld.add(gridLayer);
 
     // 添加原点标记 (为了调试方便，放在网格之上，选中层之下)
-    world.add(OriginPoint());
+    isoWorld.add(OriginPoint());
+
     // 添加迷雾层 (位于移动范围层下方)
     fogLayer = FogLayer(map: gameMap)..position = boardOffset;
-    world.add(fogLayer);
+    isoWorld.add(fogLayer);
 
-    // 添加选中层
-    // 选中层需要与网格层对齐，所以也需要设置偏移
-    world.add(SelectionOverlay()..position = boardOffset);
+    // 添加选中层（需要与网格层对齐）
+    isoWorld.add(SelectionOverlay()..position = boardOffset);
 
     // 添加范围层
     rangeLayer = RangeLayer()..position = boardOffset;
-    world.add(rangeLayer);
+    isoWorld.add(rangeLayer);
 
-    // 添加单位层
-    // 单位层需要与网格层对齐
+    // 添加单位层（需要与网格层对齐）
     unitLayer = UnitLayer()..position = boardOffset;
-    world.add(unitLayer);
+    isoWorld.add(unitLayer);
+
+    // 将 IsometricWorld 添加到世界
+    world.add(isoWorld);
 
     // 添加网格单元格 (作为逻辑实体)
     for (var x = 0; x < gameMap.width; x++) {
@@ -183,50 +201,35 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
   }
 
   // --- 相机限制逻辑 ---
+  // 相机限制基于等距变换后的包围盒（即背景层的大小）
 
   // 计算最小缩放比例，使得视口完全被世界包含（无黑边）
   double _getMinZoom() {
-    final totalWidth = gameMap.width * CellComponent.cellSize + borderWidth * 2;
-    final totalHeight = gameMap.height * CellComponent.cellSize + borderWidth * 2;
-
-    // 如果窗口还未准备好（size为0），返回一个默认值
+    // 使用等距变换后的包围盒大小
     if (size.x == 0 || size.y == 0) return 0.1;
 
-    // 视口大小 = 屏幕大小 / zoom
-    // 我们要求：视口大小 <= 世界大小
-    // 即：屏幕大小 / zoom <= 世界大小
-    // => zoom >= 屏幕大小 / 世界大小
+    final minZoomX = size.x / _isoBBSize.x;
+    final minZoomY = size.y / _isoBBSize.y;
 
-    final minZoomX = size.x / totalWidth;
-    final minZoomY = size.y / totalHeight;
-
-    // 取最大值，保证两个维度都满足条件（即整个屏幕都被世界填满）
     return math.max(minZoomX, minZoomY);
   }
 
   void _clampCamera() {
     // 1. 首先确保缩放比例不小于最小值
     final minZoom = _getMinZoom();
-    // 如果当前zoom小于minZoom，强制设为minZoom
     if (camera.viewfinder.zoom < minZoom) {
       camera.viewfinder.zoom = minZoom;
     }
 
-    // 游戏世界总尺寸
-    final totalWidth = gameMap.width * CellComponent.cellSize + borderWidth * 2;
-    final totalHeight = gameMap.height * CellComponent.cellSize + borderWidth * 2;
+    // 使用等距变换后的包围盒大小
+    final totalWidth = _isoBBSize.x;
+    final totalHeight = _isoBBSize.y;
 
     // 当前视口在世界坐标中的尺寸
     final viewportWidth = size.x / camera.viewfinder.zoom;
     final viewportHeight = size.y / camera.viewfinder.zoom;
 
     // 计算相机中心允许移动的范围
-    // 相机中心最左边位置：视口宽度的一半
-    // 相机中心最右边位置：世界宽度 - 视口宽度的一半
-    // 由于我们已经保证了 zoom >= minZoom，所以 viewportWidth <= totalWidth 必定成立
-    // 因此 minX <= maxX 必定成立
-
-    // 注意：使用 roundToDouble 或增加微小容差来避免浮点数精度导致的 min > max 问题
     final minX = viewportWidth / 2;
     final maxX = math.max(minX, totalWidth - viewportWidth / 2);
 
@@ -251,13 +254,16 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
   }
 
   CellComponent? _getCellUnderMouse(Vector2 screenPosition) {
-    // 1. 获取世界坐标
+    // 1. 屏幕坐标 → 世界坐标
     final worldPosition = camera.viewfinder.transform.globalToLocal(screenPosition);
 
-    // 2. 转换为 GridLayer 本地坐标 (减去边界偏移)
-    final localPosition = worldPosition - Vector2(borderWidth, borderWidth);
+    // 2. 世界坐标 → IsometricWorld 内容本地坐标（逆缩放 + 逆旋转）
+    final isoLocal = isoWorld.worldToLocal(worldPosition);
 
-    // 3. 计算网格坐标
+    // 3. 减去边界偏移 → GridLayer 本地坐标
+    final localPosition = isoLocal - Vector2(borderWidth, borderWidth);
+
+    // 4. 计算网格坐标
     final gridX = (localPosition.x / CellComponent.cellSize).floor();
     final gridY = (localPosition.y / CellComponent.cellSize).floor();
 
