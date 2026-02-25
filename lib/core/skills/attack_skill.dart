@@ -64,12 +64,8 @@ class AttackSkill extends Skill {
   }
 
   void _switchToMove(UnitState state, AlebelGame game) {
-    // Just switch state, game updates will handle layer/rendering changes
-    state.currentSkill = state.unit.moveSkill;
+    state.focusSkill = state.unit.moveSkill;
     game.updateRangeLayer();
-    
-    // If we wanted to re-trigger "selected" logic of move skill, we'd do it here.
-    // But since MoveSkill just calculates ranges lazily/on-demand, we just need to ensure UI updates.
   }
 
   // Helper from MoveSkill (duplicated for now as it's not exposed elsewhere cleanly)

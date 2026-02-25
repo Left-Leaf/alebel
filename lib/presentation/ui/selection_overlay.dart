@@ -23,7 +23,7 @@ class SelectionOverlay extends PositionComponent
     }
 
     // 渲染选中状态
-    final selected = game.selectedCell;
+    final selected = game.focusCell;
     if (selected != null) {
       canvas.drawRect(selected.rect, _selectedPaint);
     }

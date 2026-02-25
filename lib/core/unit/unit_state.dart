@@ -32,21 +32,23 @@ class UnitState {
   /// 行动槽值 (0-1000, 满时行动)
   double actionGauge = 0;
 
-  late Skill currentSkill;
+  late Skill _focusSkill;
+
+  Skill get focusSkill => _focusSkill;
+  set focusSkill(Skill skill) => _focusSkill = skill;
 
   UnitState({
     required this.unit,
     required this.x,
     required this.y,
-  }) : // currentMoveRange = unit.moveRange,
-       currentVisionRange = unit.visionRange,
+  }) : currentVisionRange = unit.visionRange,
        maxHp = unit.maxHp,
        currentHp = unit.maxHp,
-       maxActionPoints = unit.moveRange, // 默认最大行动点 = 移动力
+       maxActionPoints = unit.moveRange,
        currentActionPoints = unit.moveRange,
-       recoveryActionPoints = unit.moveRange, // 默认每回合恢复全部
+       recoveryActionPoints = unit.moveRange,
        currentSpeed = unit.speed {
-    currentSkill = unit.moveSkill;
+    _focusSkill = unit.moveSkill;
   }
 
   void addBuff(Buff buff) {

@@ -60,16 +60,16 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
     super.update(dt);
 
     // 更新显示的文本信息
-    final selectedUnit = game.selectedUnit;
-    if (selectedUnit != null) {
+    final unit = game.focusUnit;
+    if (unit != null) {
       _infoText.text =
-          'Selected Unit: ${selectedUnit.state.unit.faction.name}\n'
-          'Pos: (${selectedUnit.gridX}, ${selectedUnit.gridY})\n'
-          'HP: ${selectedUnit.state.currentHp} / ${selectedUnit.state.maxHp}\n'
-          'Mode: ${selectedUnit.state.currentSkill.name}';
+          'Selected Unit: ${unit.state.unit.faction.name}\n'
+          'Pos: (${unit.gridX}, ${unit.gridY})\n'
+          'HP: ${unit.state.currentHp} / ${unit.state.maxHp}\n'
+          'AP: ${unit.state.currentActionPoints} / ${unit.state.maxActionPoints}\n'
+          'Mode: ${unit.state.focusSkill.name}';
 
-      // Update skill buttons
-      _updateSkillButtons(selectedUnit.state.unit.skills);
+      _updateSkillButtons(unit.state.unit.skills);
     } else {
       _clearSkillButtons();
 
@@ -109,15 +109,6 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
     }
     _skillButtons.clear();
   }
-
-  // @override
-  // bool containsLocalPoint(Vector2 point) {
-  //   // 只有当点击到按钮时，才视为击中 UiLayer
-  //   for (final button in _skillButtons) {
-  //     if (button.containsPoint(point)) return true;
-  //   }
-  //   return false;
-  // }
 }
 
 class TurnOrderDisplay extends PositionComponent with HasGameReference<AlebelGame> {
@@ -153,12 +144,7 @@ class TurnOrderDisplay extends PositionComponent with HasGameReference<AlebelGam
       );
       y += 25;
     } else {
-      _headerPaint.render(
-        canvas,
-        'Waiting...',
-        Vector2(0, y),
-        anchor: Anchor.topRight,
-      );
+      _headerPaint.render(canvas, 'Waiting...', Vector2(0, y), anchor: Anchor.topRight);
       y += 25;
     }
 
@@ -193,7 +179,7 @@ class SkillButton extends PositionComponent with TapCallbacks, HasGameReference<
 
   @override
   void render(Canvas canvas) {
-    final isSelected = game.selectedUnit?.state.currentSkill == skill;
+    final isSelected = game.focusUnit?.state.focusSkill == skill;
 
     // 绘制按钮背景
     final rect = Rect.fromLTWH(0, 0, width, height);
@@ -212,20 +198,16 @@ class SkillButton extends PositionComponent with TapCallbacks, HasGameReference<
 
   @override
   void onTapDown(TapDownEvent event) {
-    final selectedUnit = game.selectedUnit;
-    if (selectedUnit == null) return;
+    final focusUnit = game.focusUnit;
+    if (focusUnit == null) return;
 
-    print("Skill button tapped: ${skill.name}");
-
-    // Switch skill
-    final state = selectedUnit.state;
-    if (state.currentSkill != skill) {
-      state.currentSkill = skill;
+    final state = focusUnit.state;
+    if (state.focusSkill != skill) {
+      state.focusSkill = skill;
       game.updateRangeLayer();
     } else {
-      // Toggle off? Switch to Move?
       if (skill != state.unit.moveSkill) {
-        state.currentSkill = state.unit.moveSkill;
+        state.focusSkill = state.unit.moveSkill;
         game.updateRangeLayer();
       }
     }
