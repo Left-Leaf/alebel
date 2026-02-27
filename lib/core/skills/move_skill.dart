@@ -86,11 +86,16 @@ class MoveSkill extends Skill {
 
     // 检查目标位置是否被可见单位阻挡
     final targetUnit = game.unitLayer.getUnitAt(targetPos.x, targetPos.y);
-    if (targetUnit != null && targetUnit != game.focusUnit) {
-      final cellState = game.gameMap.getCell(targetPos.x, targetPos.y);
-      if (cellState.isCenterVisible) {
-        // 被可见单位阻挡 → 焦点切到该格子
-        game.focusCell = cell;
+    if (targetUnit != null) {
+      if (targetUnit != game.focusUnit) {
+        final cellState = game.gameMap.getCell(targetPos.x, targetPos.y);
+        if (cellState.isCenterVisible) {
+          // 被可见单位阻挡 → 焦点切到该格子
+          game.focusCell = cell;
+          return;
+        }
+      } else {
+        game.focusCell = null;
         return;
       }
     }
@@ -160,10 +165,16 @@ class MoveSkill extends Skill {
 
         // Check Unit
         if (!blocked) {
-          final otherUnit = game.unitLayer.getUnitAt(endPoint.x, endPoint.y);
-          if (otherUnit != null && otherUnit != unitComponent) {
-            blocked = true;
-            print("Movement blocked by unit at ${endPoint.x}, ${endPoint.y}");
+          final isCenterVisible = game.gameMap.getCell(endPoint.x, endPoint.y).isCenterVisible;
+          if (!isCenterVisible) {
+            blocked = false;
+            print("Movement blocked by center visibility at ${endPoint.x}, ${endPoint.y}");
+          } else {
+            final otherUnit = game.unitLayer.getUnitAt(endPoint.x, endPoint.y);
+            if (otherUnit != null && otherUnit != unitComponent) {
+              blocked = true;
+              print("Movement blocked by unit at ${endPoint.x}, ${endPoint.y}");
+            }
           }
         }
 
@@ -211,7 +222,7 @@ class MoveSkill extends Skill {
       // 3. Final Check: If stopped at an invalid position (e.g. on top of another unit), backtrack
       final currentPos = (x: state.x, y: state.y);
       if (currentPos.x != lastValidPos.x || currentPos.y != lastValidPos.y) {
-        print("Stopped at invalid position ${currentPos}, backtracking to $lastValidPos");
+        print("Stopped at invalid position $currentPos, backtracking to $lastValidPos");
 
         // Calculate AP refund (if any)
         // If we moved 3 steps but had to backtrack to step 1, we should probably only cost 1 AP?

@@ -1,5 +1,4 @@
 import 'cell_state.dart';
-import '../../models/cells/cell_base.dart';
 import '../../models/cells/cell_registry.dart';
 import 'board.dart';
 
