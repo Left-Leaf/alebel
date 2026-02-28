@@ -1,6 +1,6 @@
 import '../unit/unit_state.dart';
 
-abstract class Buff {
+sealed class Buff {
   String get id;
   String get name;
   String get description;

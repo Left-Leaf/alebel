@@ -61,7 +61,7 @@ class TurnManager {
       unit.actionGauge = 0; // 重置行动槽
       
       // 恢复行动点
-      unit.currentActionPoints = unit.recoveryActionPoints.clamp(0, unit.maxActionPoints);
+      unit.recoverAp();
           
       print("Turn End: ${unit.unit.faction} Unit. AP reset to ${unit.currentActionPoints}");
 
@@ -201,7 +201,10 @@ class TurnManager {
 
   void _startUnitTurn(UnitState unit) {
     _activeUnit = unit;
-    
+
+    // 记录新回合
+    unit.beginTurnRecord();
+
     // 注意：行动点恢复逻辑已移动到 endTurn
     // 这里只负责触发回合开始事件
     

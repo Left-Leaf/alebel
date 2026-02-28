@@ -1,14 +1,4 @@
-import 'dart:async';
-
-import 'package:flame/components.dart';
-import 'package:flame/effects.dart';
-import 'package:flutter/material.dart';
-
-import '../../game/alebel_game.dart';
-import '../../presentation/components/cell_component.dart';
-import '../map/board.dart';
-import '../unit/unit_state.dart';
-import 'skill.dart';
+part of 'skill.dart';
 
 class MoveSkill extends Skill {
   @override
@@ -68,11 +58,11 @@ class MoveSkill extends Skill {
   }
 
   @override
-  void onCellTap(UnitState state, CellComponent cell, AlebelGame game) {
+  bool onCellTap(UnitState state, CellComponent cell, AlebelGame game) {
     if (game.turnManager.activeUnit != state) {
       // 不是该单位的回合，放弃焦点，切到点击的格子
       game.focusCell = cell;
-      return;
+      return false;
     }
 
     _ensurePaths(state, game);
@@ -81,32 +71,34 @@ class MoveSkill extends Skill {
     if (!_isReachable(targetPos)) {
       // 不可达 → 放弃当前单位，焦点切到点击的格子
       game.focusCell = cell;
-      return;
+      return false;
     }
 
     // 检查目标位置是否被可见单位阻挡
     final targetUnit = game.unitLayer.getUnitAt(targetPos.x, targetPos.y);
     if (targetUnit != null) {
-      if (targetUnit != game.focusUnit) {
+      if (targetUnit.state != state) {
         final cellState = game.gameMap.getCell(targetPos.x, targetPos.y);
         if (cellState.isCenterVisible) {
           // 被可见单位阻挡 → 焦点切到该格子
           game.focusCell = cell;
-          return;
+          return false;
         }
       } else {
         game.focusCell = null;
-        return;
+        return false;
       }
     }
 
     // 可达且未阻挡
     if (state.previewPosition?.x == targetPos.x && state.previewPosition?.y == targetPos.y) {
       _confirmMovement(state, game);
+      return true;
     } else {
       state.previewPosition = targetPos;
       game.updateRangeLayer();
       game.updatePreviewUnit();
+      return false;
     }
   }
 

@@ -1,6 +1,4 @@
 import '../../core/skills/skill.dart';
-import '../../core/skills/attack_skill.dart';
-import '../../core/skills/move_skill.dart';
 import 'unit_base.dart';
 
 class BasicSoldier extends Unit {
@@ -12,6 +10,9 @@ class BasicSoldier extends Unit {
 
   @override
   final int attackRange;
+
+  @override
+  final int attack;
 
   @override
   final int speed;
@@ -31,6 +32,7 @@ class BasicSoldier extends Unit {
     this.moveRange = 5,
     this.visionRange = 5,
     this.attackRange = 1,
+    this.attack = 10,
     this.speed = 10,
     this.maxHp = 100,
   }) : 

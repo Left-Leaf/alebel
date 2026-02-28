@@ -297,7 +297,11 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
   void onCellTap(CellComponent cell) {
     final source = focusUnit;
     if (source != null) {
-      source.state.focusSkill.onCellTap(source.state, cell, this);
+      final skill = source.state.focusSkill;
+      final executed = skill.onCellTap(source.state, cell, this);
+      if (executed) {
+        source.state.recordSkill(skill);
+      }
     } else {
       focusCell = (focusCell == cell) ? null : cell;
     }

@@ -1,11 +1,19 @@
-import '../skills/skill.dart';
 import 'package:alebel/models/units/unit_base.dart';
-import '../map/board.dart'; // Position
-import '../buffs/buff.dart';
 
-class UnitState {
+import '../buffs/buff.dart';
+import '../map/board.dart'; // Position
+import '../skills/skill.dart';
+import 'action_gauge_mixin.dart';
+import 'action_point_mixin.dart';
+import 'attack_mixin.dart';
+import 'health_mixin.dart';
+import 'skill_record_mixin.dart';
+import 'vision_mixin.dart';
+
+class UnitState
+    with HealthMixin, AttackMixin, ActionPointMixin, VisionMixin, ActionGaugeMixin, SkillRecordMixin {
   final Unit unit;
-  
+
   // Buffs
   final List<Buff> buffs = [];
   int x;
@@ -14,42 +22,47 @@ class UnitState {
   // 移动预览位置 (如果非空，表示正在预览移动到该位置)
   Position? previewPosition;
 
-  // 动态属性（运行时可能会改变）
-  int currentVisionRange;
-  
-  // 生命值
+  // HealthMixin
+  @override
   int maxHp;
+  @override
   int currentHp;
 
-  // 行动点相关
-  int maxActionPoints; // 最大行动点数
-  int currentActionPoints; // 当前剩余行动点
-  int recoveryActionPoints; // 回合结束恢复的行动点数
-  
-  /// 动态速度 (受Buff/Debuff影响)
+  // AttackMixin
+  @override
+  int currentAttack;
+
+  // ActionPointMixin
+  @override
+  int maxActionPoints;
+  @override
+  int currentActionPoints;
+  @override
+  int recoveryActionPoints;
+
+  // VisionMixin
+  @override
+  int currentVisionRange;
+
+  // ActionGaugeMixin
+  @override
   int currentSpeed;
-  
-  /// 行动槽值 (0-1000, 满时行动)
+  @override
   double actionGauge = 0;
 
-  late Skill _focusSkill;
+  // SkillRecordMixin
+  @override
+  late Skill focusSkill = unit.moveSkill;
 
-  Skill get focusSkill => _focusSkill;
-  set focusSkill(Skill skill) => _focusSkill = skill;
-
-  UnitState({
-    required this.unit,
-    required this.x,
-    required this.y,
-  }) : currentVisionRange = unit.visionRange,
-       maxHp = unit.maxHp,
-       currentHp = unit.maxHp,
-       maxActionPoints = unit.moveRange,
-       currentActionPoints = unit.moveRange,
-       recoveryActionPoints = unit.moveRange,
-       currentSpeed = unit.speed {
-    _focusSkill = unit.moveSkill;
-  }
+  UnitState({required this.unit, required this.x, required this.y})
+    : currentVisionRange = unit.visionRange,
+      maxHp = unit.maxHp,
+      currentHp = unit.maxHp,
+      currentAttack = unit.attack,
+      maxActionPoints = unit.moveRange,
+      currentActionPoints = unit.moveRange,
+      recoveryActionPoints = unit.moveRange,
+      currentSpeed = unit.speed;
 
   void addBuff(Buff buff) {
     buffs.add(buff);
@@ -65,9 +78,10 @@ class UnitState {
     // 1. Reset to base
     currentVisionRange = unit.visionRange;
     maxHp = unit.maxHp;
+    currentAttack = unit.attack;
     // 注意：如果是百分比修改 HP，这里可能需要特殊处理。目前假设只修改上限。
     // currentHp 不受影响，除非超过 maxHp
-    
+
     maxActionPoints = unit.moveRange;
     recoveryActionPoints = unit.moveRange;
     currentSpeed = unit.speed;
@@ -81,6 +95,6 @@ class UnitState {
     }
 
     // 4. Clamp state
-    if (currentHp > maxHp) currentHp = maxHp;
+    clampHp();
   }
 }

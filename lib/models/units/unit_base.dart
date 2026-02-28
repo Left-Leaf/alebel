@@ -1,6 +1,5 @@
 import 'dart:ui';
 import '../../core/skills/skill.dart';
-import '../../core/skills/move_skill.dart';
 
 enum UnitFaction {
   player,
@@ -21,6 +20,9 @@ abstract class Unit {
 
   /// 攻击范围
   int get attackRange;
+
+  /// 基础攻击力
+  int get attack;
 
   /// 基础速度 (决定行动槽积累速度)
   int get speed;

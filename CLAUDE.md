@@ -10,11 +10,12 @@ Alebel is a turn-based tactical strategy game built with Flutter and the Flame g
 
 ```bash
 # Flutter version is pinned to 3.38.7 via FVM (.fvmrc)
-flutter pub get          # Install dependencies
-flutter analyze          # Lint (uses flutter_lints)
-flutter test             # Run all tests
-flutter test test/widget_test.dart  # Run a single test file
-flutter run              # Run the app
+# ALL flutter commands MUST use fvm prefix
+fvm flutter pub get          # Install dependencies
+fvm flutter analyze          # Lint (uses flutter_lints)
+fvm flutter test             # Run all tests
+fvm flutter test test/widget_test.dart  # Run a single test file
+fvm flutter run              # Run the app
 ```
 
 ## Architecture
@@ -22,29 +23,38 @@ flutter run              # Run the app
 The codebase follows a three-layer separation: core logic, data models, and presentation.
 
 - `lib/core/` — Game logic and state management
-  - `battle/` — Turn system (`TurnManager`: player/enemy turn flow)
-  - `map/` — Grid management (`GameMap`), pathfinding (`Board` with A*), cell runtime state (`CellState`)
-  - `skills/` — Skill base class with `MoveSkill` and `AttackSkill` implementations
-  - `unit/` — Runtime unit state (`UnitState`: position, HP, cooldowns)
-  - `buffs/` — Buff/status effect system
-- `lib/models/` — Static data definitions
-  - `cells/` — Cell types (Ground, Forest, Water, Wall) registered in `cell_registry.dart`
-  - `units/` — Unit definitions extending abstract `Unit` class (e.g. `BasicSoldier`)
+  - `battle/` — ATB (Active Time Battle) turn system. `TurnManager` fills action gauges based on unit speed; gauge hits 1000 → unit acts.
+  - `map/` — `GameMap` stores 2D grid of `CellState`. `Board` extension provides A* pathfinding (`getMovablePositions`) and ray-cast vision (`getVisiblePositions`). `Position` typedef: `({int x, int y})`.
+  - `skills/` — Sealed `Skill` base class with `MoveSkill` and `AttackSkill` as `part` files. `onCellTap` returns `bool` (true = skill executed). MoveSkill uses two-tap flow: first tap → preview, second tap → confirm.
+  - `unit/` — `UnitState` tracks runtime state (position, HP, action points, buffs, `turnSkillHistory`).
+  - `buffs/` — Sealed `Buff` base class with priority-based application and per-turn hooks.
+- `lib/models/` — Static data definitions (immutable configs)
+  - `cells/` — Cell types (Ground, Forest, Water, Wall) registered in `cell_registry.dart` by integer ID.
+  - `units/` — Unit definitions extending abstract `Unit` class (e.g. `BasicSoldier`). Defines stats, skills, faction.
 - `lib/presentation/` — Flame components and rendering
-  - `components/` — Entity components (`UnitComponent`, `CellComponent`, `IsometricComponent`)
-  - `layers/` — Rendering layers: Background, Grid, Fog, Range, Units, UI
-  - `ui/` — HUD overlays (`SelectionOverlay`, `UiLayer`)
-- `lib/game/` — Main game loop (`AlebelGame` extends `FlameGame`)
+  - `components/` — `IsometricComponent` applies 30° isometric matrix transform to all children. `CellComponent` (50x50 px) and `UnitComponent` handle individual entity rendering and input.
+  - `layers/` — Stacked rendering layers by priority: Background(-1) → Grid(1) → Fog(3) → SelectionOverlay(4) → Range(5) → Units(6). All inside `IsometricComponent` except Background.
+  - `ui/` — `UiLayer` is attached to camera viewport (screen-fixed). Contains info text, turn order display, skill buttons, end turn button.
+- `lib/game/` — `AlebelGame extends FlameGame`: entry point, initializes board/layers/units, handles all input delegation.
+- `lib/common/` — `assets.dart` (centralized asset paths), `theme.dart` (color constants with brightness-aware selection).
 
 ## Key Patterns
 
 - Entry point: `lib/main.dart` → `GameWidget(game: AlebelGame())`
-- `AlebelGame` initializes the isometric board with stacked rendering layers and sets up input handling (pan, zoom, click, hover, long-press)
-- Units are defined as static models in `models/units/`, with runtime state tracked separately in `core/unit/UnitState`
-- Cells follow the same pattern: static config in `models/cells/Cell`, runtime state in `core/map/CellState`
+- **Static vs Runtime separation**: `Unit`/`Cell` are immutable configs; `UnitState`/`CellState` track mutable runtime data. New instances of `UnitState` reference a shared `Unit` definition.
+- **Sealed class + part files**: `Skill` and `Buff` use sealed base classes with implementations in `part` files. Extend these the same way.
+- **Registry pattern**: `CellRegistry` maps integer IDs to `Cell` instances for map serialization.
+- **Focus system**: `AlebelGame.focusCell` drives selection highlight; `focusUnit` (derived from focusCell) drives skill interaction and range display.
+- **Async movement**: `MoveSkill._confirmMovement()` uses `Completer` to chain `MoveToEffect` animations step-by-step, updating fog after each step.
 - New units: extend `Unit` in `lib/models/units/`, override `moveRange`, `skills`, etc.
-- New cell types: extend `Cell` in `lib/models/cells/`, register in `cell_registry.dart`
-- Pathfinding uses A* with a priority queue from the `collection` package
+- New cell types: extend `Cell` in `lib/models/cells/`, register in `cell_registry.dart`.
+
+## UI Conventions
+
+- Prefer `StatelessWidget`; avoid `StatefulWidget` unless necessary.
+- Avoid `Container`; use `DecoratedBox`, `Padding`, `Align`, `SizedBox`, `ColorBox` instead.
+- All widgets should be adaptive-sized; avoid fixed dimensions unless required.
+- Use centralized color definitions from `lib/common/theme.dart` and asset paths from `lib/common/assets.dart`.
 
 ## Key Dependencies
 

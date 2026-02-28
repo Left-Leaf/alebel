@@ -1,12 +1,4 @@
-
-import 'package:flutter/material.dart';
-
-import '../../presentation/components/cell_component.dart';
-import '../../game/alebel_game.dart';
-// import '../../models/units/unit_base.dart';
-import '../map/board.dart';
-import '../unit/unit_state.dart';
-import 'skill.dart';
+part of 'skill.dart';
 
 class AttackSkill extends Skill {
   @override
@@ -26,13 +18,13 @@ class AttackSkill extends Skill {
   }
 
   @override
-  void onCellTap(UnitState state, CellComponent cell, AlebelGame game) {
+  bool onCellTap(UnitState state, CellComponent cell, AlebelGame game) {
     // Only allow interaction if it's this unit's turn
-    if (game.turnManager.activeUnit != state) return;
+    if (game.turnManager.activeUnit != state) return false;
 
     // Handle attack logic
     final target = game.unitLayer.getUnitAt(cell.gridX, cell.gridY);
-    
+
     // Check if target is valid and visible
     bool isValidTarget = false;
     if (target != null && target.faction != state.unit.faction) {
@@ -48,18 +40,21 @@ class AttackSkill extends Skill {
       if (distance <= state.unit.attackRange) {
         print('Attacking unit at ${cell.gridX}, ${cell.gridY}');
         // TODO: Implement damage logic
-        
+
         // Attack performed, end turn
         // game.turnManager.endTurn();
-        
+
         // Switch back to MoveSkill
         _switchToMove(state, game);
+        return true;
       } else {
         print('Target out of range');
         // Stay in attack mode
+        return false;
       }
     } else {
       // Clicked empty space or ally -> Stay in attack mode
+      return false;
     }
   }
 
