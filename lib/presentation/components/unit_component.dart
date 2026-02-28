@@ -32,7 +32,7 @@ class UnitComponent extends PositionComponent
   void render(Canvas canvas) {
     // 检查迷雾状态
     // 通过 game 引用获取地图数据
-    final cellState = game.gameMap.getCell(gridX, gridY);
+    final cellState = game.board.gameMap.getCell(gridX, gridY);
 
     // 如果单位所在的格子不是中心可见，且不是玩家单位，则不渲染
     // 玩家单位总是渲染（哪怕在迷雾中，可能是为了调试或者特殊效果）

@@ -5,30 +5,30 @@ class AttackSkill extends Skill {
   String get name => 'Attack';
 
   @override
-  List<({int x, int y, Color color})> getHighlightPositions(UnitState state, AlebelGame game) {
+  List<({int x, int y, Color color})> getHighlightPositions(UnitState state, BoardComponent board) {
     final startPos = (x: state.x, y: state.y);
     final attackRange = state.unit.attackRange;
-    final attackablePositions = _getAttackablePositions(startPos, attackRange, game);
-    
+    final attackablePositions = _getAttackablePositions(startPos, attackRange, board);
+
     return attackablePositions.map((pos) => (
-      x: pos.x, 
-      y: pos.y, 
+      x: pos.x,
+      y: pos.y,
       color: Colors.red.withOpacity(0.3)
     )).toList();
   }
 
   @override
-  bool onCellTap(UnitState state, CellComponent cell, AlebelGame game) {
+  bool onCellTap(UnitState state, CellComponent cell, BoardComponent board) {
     // Only allow interaction if it's this unit's turn
-    if (game.turnManager.activeUnit != state) return false;
+    if (board.turnManager.activeUnit != state) return false;
 
     // Handle attack logic
-    final target = game.unitLayer.getUnitAt(cell.gridX, cell.gridY);
+    final target = board.unitLayer.getUnitAt(cell.gridX, cell.gridY);
 
     // Check if target is valid and visible
     bool isValidTarget = false;
     if (target != null && target.faction != state.unit.faction) {
-       final cellState = game.gameMap.getCell(cell.gridX, cell.gridY);
+       final cellState = board.gameMap.getCell(cell.gridX, cell.gridY);
        if (cellState.isCenterVisible) {
          isValidTarget = true;
        }
@@ -42,10 +42,10 @@ class AttackSkill extends Skill {
         // TODO: Implement damage logic
 
         // Attack performed, end turn
-        // game.turnManager.endTurn();
+        // board.turnManager.endTurn();
 
         // Switch back to MoveSkill
-        _switchToMove(state, game);
+        _switchToMove(state, board);
         return true;
       } else {
         print('Target out of range');
@@ -58,20 +58,20 @@ class AttackSkill extends Skill {
     }
   }
 
-  void _switchToMove(UnitState state, AlebelGame game) {
+  void _switchToMove(UnitState state, BoardComponent board) {
     state.focusSkill = state.unit.moveSkill;
-    game.updateRangeLayer();
+    board.updateRangeLayer();
   }
 
   // Helper from MoveSkill (duplicated for now as it's not exposed elsewhere cleanly)
-  List<Position> _getAttackablePositions(Position center, int range, AlebelGame game) {
+  List<Position> _getAttackablePositions(Position center, int range, BoardComponent board) {
     final positions = <Position>[];
     for (var dx = -range; dx <= range; dx++) {
       for (var dy = -range; dy <= range; dy++) {
         if (dx.abs() + dy.abs() <= range) {
           final x = center.x + dx;
           final y = center.y + dy;
-          if (x >= 0 && x < game.gameMap.width && y >= 0 && y < game.gameMap.height) {
+          if (x >= 0 && x < board.gameMap.width && y >= 0 && y < board.gameMap.height) {
             if (dx == 0 && dy == 0) continue;
             positions.add((x: x, y: y));
           }

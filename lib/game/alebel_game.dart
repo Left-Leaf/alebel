@@ -1,78 +1,46 @@
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
-import 'package:flutter/material.dart' show Colors;
 
-import '../core/battle/turn_manager.dart';
-import '../core/map/game_map.dart';
-import '../core/unit/unit_state.dart';
-import '../models/units/basic_soldier.dart';
-import '../models/units/unit_base.dart';
+import '../core/game_mode.dart';
 import '../presentation/components/cell_component.dart';
 import '../presentation/components/isometric_component.dart';
-import '../presentation/components/origin_point.dart';
-import '../presentation/components/unit_component.dart';
 import '../presentation/layers/background_layer.dart';
-import '../presentation/layers/fog_layer.dart';
-import '../presentation/layers/grid_layer.dart';
-import '../presentation/layers/range_layer.dart';
-import '../presentation/layers/unit_layer.dart';
-import '../presentation/ui/selection_overlay.dart';
 import '../presentation/ui/ui_layer.dart';
+import 'board_component.dart';
+import 'exploration_controller.dart';
 
-class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMovementDetector {
-  late final IsometricComponent isoBoard;
-  late final GridLayer gridLayer;
-  late final UnitLayer unitLayer;
-  late final RangeLayer rangeLayer;
-  late final FogLayer fogLayer;
-  late GameMap gameMap;
-  late final TurnManager turnManager;
+class AlebelGame extends FlameGame
+    with ScrollDetector, PanDetector, MouseMovementDetector, HasKeyboardHandlerComponents {
+  late final BoardComponent board;
 
-  /// 投影后的棋盘包围盒尺寸（含边界），用于相机限制
-  late final Vector2 _projectedBoardSize;
+  /// 投影后的棋盘包围盒（原点 + 尺寸），用于相机限制
+  late Vector2 _projectedBoardOrigin;
+  late Vector2 _projectedBoardSize;
 
-  // 交互状态
-  CellComponent? _hoveredCell;
+  // --- 模式状态 ---
+  GameMode _mode = GameMode.exploration;
 
-  CellComponent? get hoveredCell => _hoveredCell;
+  GameMode get mode => _mode;
 
-  // --- 焦点系统 ---
+  bool get isTransitioning => _isTransitioning;
 
-  CellComponent? _focusCell;
+  // 过渡动画状态
+  bool _isTransitioning = false;
+  double _transitionProgress = 0.0;
+  static const double _transitionDuration = 1.5;
 
-  CellComponent? get focusCell => _focusCell;
+  // 过渡方向
+  bool _transitionToBattle = true;
 
-  set focusCell(CellComponent? cell) {
-    if (_focusCell == cell) return;
-
-    // 清理旧焦点单位的状态
-    final oldUnit = focusUnit;
-    if (oldUnit != null) {
-      oldUnit.state.previewPosition = null;
-    }
-
-    // 切换 cell 选中态
-    _focusCell?.isSelected = false;
-    _focusCell = cell;
-    _focusCell?.isSelected = true;
-
-    // 联动刷新
-    _updatePreviewUnit();
-    _updateRangeLayer();
-  }
-
-  /// 当前焦点格子上的单位（派生属性）
-  UnitComponent? get focusUnit {
-    if (_focusCell == null) return null;
-    return unitLayer.getUnitAt(_focusCell!.gridX, _focusCell!.gridY);
-  }
-
-  // 预览/投影单位 (Ghost Unit)
-  UnitComponent? _previewUnit;
+  // 过渡参数
+  late Vector2 _pivotLocal; // 视角枢轴点（棋盘本地坐标，通常是玩家 Unit 位置）
+  late Vector2 _startPos; // 过渡开始时的相机位置（用于对战→探索 phase1 pan）
+  late Vector2 _endWorldPos; // 最终目标世界坐标
+  late double _startZoom;
+  late double _endZoom;
 
   // 拖拽/点击判定状态
   Vector2? _dragStartScreenPos;
@@ -81,122 +49,210 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
   // 常量
   static const double _dragThreshold = 5.0;
 
-  // 棋盘外围边界宽度（单元格的三倍）
-  static const double borderWidth = CellComponent.cellSize;
-
   @override
   Future<void> onLoad() async {
-    turnManager = TurnManager();
-    gameMap = GameMap.standard();
+    board = BoardComponent();
+    world.add(board);
 
-    // 计算网格和边界的偏移量
-    final boardOffset = Vector2(borderWidth, borderWidth);
+    // 等待 board 加载完成以获取 gameMap 尺寸
+    await board.loaded;
 
-    // 原始棋盘总尺寸（投影前）
-    final totalWidth = gameMap.width * CellComponent.cellSize + borderWidth * 2;
-    final totalHeight = gameMap.height * CellComponent.cellSize + borderWidth * 2;
+    // 计算投影尺寸（初始为俯视图，直接尺寸）
+    _recalculateProjectedBounds();
 
-    // 投影后的包围盒尺寸
-    _projectedBoardSize = IsometricComponent.projectedBoundingBoxSize(totalWidth, totalHeight);
-
-    // 创建等角投影容器
-    // 偏移使投影后的包围盒左上角对齐世界原点 (0, 0)
-    isoBoard = IsometricComponent(position: Vector2(totalHeight * IsometricComponent.cos30, 0));
-
-    // 设置相机锚点，居中于投影后的包围盒
+    // 设置相机锚点
     camera.viewfinder.anchor = Anchor.center;
-    camera.viewfinder.position = Vector2(_projectedBoardSize.x / 2, _projectedBoardSize.y / 2);
+
+    // 初始相机位置 = 玩家 Unit 世界坐标
+    final pu = board.playerUnit;
+    if (pu != null) {
+      camera.viewfinder.position = Vector2(
+        BoardComponent.borderWidth + (pu.state.x + 0.5) * CellComponent.cellSize,
+        BoardComponent.borderWidth + (pu.state.y + 0.5) * CellComponent.cellSize,
+      );
+    } else {
+      camera.viewfinder.position = Vector2(
+        _projectedBoardOrigin.x + _projectedBoardSize.x / 2,
+        _projectedBoardOrigin.y + _projectedBoardSize.y / 2,
+      );
+    }
+
+    // 初始 zoom = 2.0（探索近距离视角）
+    camera.viewfinder.zoom = 2.0;
 
     // 背景层不参与等角投影，直接铺满投影后的包围盒区域
     world.add(BackgroundLayer()..priority = -1);
 
-    // 添加各层到等角投影容器（按渲染顺序，priority 从低到高）
-    gridLayer = GridLayer()
-      ..position = boardOffset
-      ..priority = 1;
-    isoBoard.add(gridLayer);
-
-    isoBoard.add(OriginPoint()..priority = 2);
-
-    fogLayer = FogLayer(map: gameMap)
-      ..position = boardOffset
-      ..priority = 3;
-    isoBoard.add(fogLayer);
-
-    isoBoard.add(
-      SelectionOverlay()
-        ..position = boardOffset
-        ..priority = 4,
-    );
-
-    rangeLayer = RangeLayer()
-      ..position = boardOffset
-      ..priority = 5;
-    isoBoard.add(rangeLayer);
-
-    unitLayer = UnitLayer()
-      ..position = boardOffset
-      ..priority = 6;
-    isoBoard.add(unitLayer);
-
-    world.add(isoBoard);
-
-    // 添加网格单元格 (作为逻辑实体)
-    for (var x = 0; x < gameMap.width; x++) {
-      for (var y = 0; y < gameMap.height; y++) {
-        final cellState = gameMap.getCell(x, y);
-        final cell = CellComponent(state: cellState);
-        gridLayer.addCell(cell);
-      }
-    }
-
-    // 添加测试单位
-    _addUnit(2, 2, Colors.blue, faction: UnitFaction.player);
-    _addUnit(4, 5, Colors.blue, faction: UnitFaction.player);
-    _addUnit(6, 6, Colors.red, faction: UnitFaction.enemy);
-
     // 添加 UI 层 (添加到视口，使其固定在屏幕上)
     camera.viewport.add(UiLayer());
 
-    turnManager.startBattle();
+    // 添加探索控制器
+    world.add(ExplorationController());
+  }
 
-    turnManager.onUnitTurnStart = (unit) {
-      print("Game: Turn started for ${unit.unit.faction}");
-      if (unit.unit.faction == UnitFaction.player) {
-        focusCell = gridLayer.getCell(unit.x, unit.y);
+  // --- 投影包围盒计算 ---
+
+  /// 计算棋盘在当前 isoFactor 下的投影包围盒（原点 + 尺寸）。
+  ///
+  /// iso 投影会将棋盘左下角 (0, H) 映射到负 x 区域，
+  /// 因此必须同时追踪原点偏移量，相机 clamp 才能正确工作。
+  void _recalculateProjectedBounds() {
+    final w = board.gameMap.width * CellComponent.cellSize + BoardComponent.borderWidth * 2;
+    final h = board.gameMap.height * CellComponent.cellSize + BoardComponent.borderWidth * 2;
+
+    // 将棋盘四角通过当前 iso 矩阵投影到世界坐标
+    final c0 = board.projectLocal(Vector2(0, 0));
+    final c1 = board.projectLocal(Vector2(w, 0));
+    final c2 = board.projectLocal(Vector2(0, h));
+    final c3 = board.projectLocal(Vector2(w, h));
+
+    final xs = [c0.x, c1.x, c2.x, c3.x];
+    final ys = [c0.y, c1.y, c2.y, c3.y];
+
+    final xMin = xs.reduce(math.min);
+    final xMax = xs.reduce(math.max);
+    final yMin = ys.reduce(math.min);
+    final yMax = ys.reduce(math.max);
+
+    _projectedBoardOrigin = Vector2(xMin, yMin);
+    _projectedBoardSize = Vector2(xMax - xMin, yMax - yMin);
+  }
+
+  // --- 辅助：计算玩家单位在棋盘本地坐标 ---
+
+  Vector2 _playerLocalPos() {
+    final pu = board.playerUnit!;
+    return Vector2(
+      BoardComponent.borderWidth + (pu.state.x + 0.5) * CellComponent.cellSize,
+      BoardComponent.borderWidth + (pu.state.y + 0.5) * CellComponent.cellSize,
+    );
+  }
+
+  // --- 过渡动画 ---
+
+  /// 探索 → 对战
+  ///
+  /// Phase 1 (前半): isoFactor 0→1，相机始终跟踪玩家 Unit 经投影后的位置（视角中心稳定）
+  /// Phase 2 (后半): isoFactor 保持 1，相机从玩家 Unit(iso) 平移到棋盘中心(iso)，同时缩放
+  void startTransitionToBattle() {
+    if (_isTransitioning || _mode == GameMode.battle) return;
+
+    _transitionToBattle = true;
+    _startZoom = camera.viewfinder.zoom;
+
+    // 枢轴 = 玩家 Unit 棋盘本地坐标
+    _pivotLocal = _playerLocalPos();
+
+    // 最终目标 = 玩家 Unit 在 iso 投影下的位置（保持以玩家为中心）
+    _endWorldPos = IsometricComponent.project(_pivotLocal.x, _pivotLocal.y);
+
+    // 目标 zoom = 适度缩小，仅比探索视角稍远
+    _endZoom = 1.0;
+
+    _transitionProgress = 0.0;
+    _isTransitioning = true;
+  }
+
+  /// 对战 → 探索
+  ///
+  /// Phase 1 (前半): isoFactor 保持 1，相机从当前位置平移到玩家 Unit(iso)，同时缩放
+  /// Phase 2 (后半): isoFactor 1→0，相机始终跟踪玩家 Unit 经投影后的位置（视角中心稳定）
+  void startTransitionToExploration() {
+    if (_isTransitioning || _mode == GameMode.exploration) return;
+
+    _transitionToBattle = false;
+    _startPos = camera.viewfinder.position.clone();
+    _startZoom = camera.viewfinder.zoom;
+
+    // 枢轴 = 玩家 Unit 棋盘本地坐标
+    _pivotLocal = _playerLocalPos();
+
+    // 最终目标 = 玩家 Unit 在俯视视角下的世界坐标（= 本地坐标）
+    _endWorldPos = _pivotLocal.clone();
+    _endZoom = 2.0;
+
+    _transitionProgress = 0.0;
+    _isTransitioning = true;
+  }
+
+  void _onTransitionComplete() {
+    _isTransitioning = false;
+
+    if (_transitionToBattle) {
+      board.initBattle();
+      _mode = GameMode.battle;
+    } else {
+      board.teardownBattle();
+      _mode = GameMode.exploration;
+    }
+
+    _recalculateProjectedBounds();
+    clampCamera();
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+
+    if (_isTransitioning) {
+      _transitionProgress = (_transitionProgress + dt / _transitionDuration).clamp(0.0, 1.0);
+      final t = _transitionProgress;
+
+      if (_transitionToBattle) {
+        _updateTransitionToBattle(t);
       } else {
-        print("Enemy turn - simple pass for now");
-        Future.delayed(const Duration(seconds: 1), () {
-          turnManager.endTurn();
-        });
+        _updateTransitionToExploration(t);
       }
-    };
 
-    turnManager.onUnitTurnEnd = (unit) {
-      print("Game: Turn ended for ${unit.unit.faction}");
-      if (focusUnit?.state == unit) {
-        focusCell = null;
+      _recalculateProjectedBounds();
+
+      if (t >= 1.0) {
+        _onTransitionComplete();
       }
-    };
+    }
   }
 
-  void _addUnit(int x, int y, Color color, {UnitFaction faction = UnitFaction.player}) {
-    final unit = BasicSoldier(color: color, faction: faction);
-    final unitState = UnitState(unit: unit, x: x, y: y);
-    final unitComponent = UnitComponent(state: unitState);
-    unitLayer.addUnit(unitComponent);
-
-    turnManager.registerUnit(unitState);
-    updateFog();
+  /// 探索→对战 过渡更新
+  void _updateTransitionToBattle(double t) {
+    if (t <= 0.5) {
+      // Phase 1: iso 变换，相机锁定枢轴点
+      final pt = t / 0.5; // 0→1
+      board.isoFactor = pt;
+      camera.viewfinder.position = board.projectLocal(_pivotLocal);
+      camera.viewfinder.zoom = _startZoom;
+    } else {
+      // Phase 2: 平移 + 缩放
+      final pt = (t - 0.5) / 0.5; // 0→1
+      board.isoFactor = 1.0;
+      final pivotIso = board.projectLocal(_pivotLocal);
+      camera.viewfinder.position = _lerpV2(pivotIso, _endWorldPos, pt);
+      camera.viewfinder.zoom = _startZoom + (_endZoom - _startZoom) * pt;
+    }
   }
 
-  void updateFog() {
-    final visionSources = unitLayer.units
-        .where((u) => u.faction == UnitFaction.player)
-        .map((u) => (x: u.gridX, y: u.gridY, range: u.state.currentVisionRange))
-        .toList();
+  /// 对战→探索 过渡更新
+  void _updateTransitionToExploration(double t) {
+    if (t <= 0.5) {
+      // Phase 1: 平移到枢轴点 + 缩放
+      final pt = t / 0.5; // 0→1
+      board.isoFactor = 1.0;
+      final pivotIso = board.projectLocal(_pivotLocal);
+      camera.viewfinder.position = _lerpV2(_startPos, pivotIso, pt);
+      camera.viewfinder.zoom = _startZoom + (_endZoom - _startZoom) * pt;
+    } else {
+      // Phase 2: iso 还原，相机锁定枢轴点
+      final pt = (t - 0.5) / 0.5; // 0→1
+      board.isoFactor = 1.0 - pt;
+      camera.viewfinder.position = board.projectLocal(_pivotLocal);
+      camera.viewfinder.zoom = _endZoom;
+    }
+  }
 
-    gameMap.updateFog(visionSources);
+  static Vector2 _lerpV2(Vector2 a, Vector2 b, double t) {
+    return Vector2(
+      a.x + (b.x - a.x) * t,
+      a.y + (b.y - a.y) * t,
+    );
   }
 
   // --- 相机限制逻辑 ---
@@ -210,7 +266,7 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
     return math.max(minZoomX, minZoomY);
   }
 
-  void _clampCamera() {
+  void clampCamera() {
     final minZoom = _getMinZoom();
     if (camera.viewfinder.zoom < minZoom) {
       camera.viewfinder.zoom = minZoom;
@@ -219,11 +275,12 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
     final viewportWidth = size.x / camera.viewfinder.zoom;
     final viewportHeight = size.y / camera.viewfinder.zoom;
 
-    final minX = viewportWidth / 2;
-    final maxX = math.max(minX, _projectedBoardSize.x - viewportWidth / 2);
+    // 使用投影包围盒的原点偏移量来正确计算 clamp 范围
+    final minX = _projectedBoardOrigin.x + viewportWidth / 2;
+    final maxX = math.max(minX, _projectedBoardOrigin.x + _projectedBoardSize.x - viewportWidth / 2);
 
-    final minY = viewportHeight / 2;
-    final maxY = math.max(minY, _projectedBoardSize.y - viewportHeight / 2);
+    final minY = _projectedBoardOrigin.y + viewportHeight / 2;
+    final maxY = math.max(minY, _projectedBoardOrigin.y + _projectedBoardSize.y - viewportHeight / 2);
 
     final x = camera.viewfinder.position.x.clamp(minX, maxX);
     final y = camera.viewfinder.position.y.clamp(minY, maxY);
@@ -235,20 +292,7 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
   void onGameResize(Vector2 size) {
     super.onGameResize(size);
     if (isLoaded) {
-      _clampCamera();
-    }
-  }
-
-  // --- 悬停逻辑 ---
-  void onCellHoverEnter(CellComponent cell) {
-    if (_hoveredCell != cell) {
-      _hoveredCell = cell;
-    }
-  }
-
-  void onCellHoverExit(CellComponent cell) {
-    if (_hoveredCell == cell) {
-      _hoveredCell = null;
+      clampCamera();
     }
   }
 
@@ -256,15 +300,19 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
 
   @override
   void onPanStart(DragStartInfo info) {
+    if (_mode == GameMode.exploration || _isTransitioning) return;
     _dragStartScreenPos = info.eventPosition.widget.clone();
     _isDragging = false;
   }
 
   @override
   void onPanUpdate(DragUpdateInfo info) {
+    if (_mode == GameMode.exploration || _isTransitioning) return;
+
     final currentScreenPos = info.eventPosition.widget;
 
     if (!_isDragging) {
+      if (_dragStartScreenPos == null) return;
       final distance = currentScreenPos.distanceTo(_dragStartScreenPos!);
       if (distance >= _dragThreshold) {
         _isDragging = true;
@@ -273,7 +321,7 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
 
     if (_isDragging) {
       camera.viewfinder.position -= info.delta.global / camera.viewfinder.zoom;
-      _clampCamera();
+      clampCamera();
     }
   }
 
@@ -292,72 +340,11 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
     _dragStartScreenPos = null;
   }
 
-  // --- 点击逻辑 ---
-
-  void onCellTap(CellComponent cell) {
-    final source = focusUnit;
-    if (source != null) {
-      final skill = source.state.focusSkill;
-      final executed = skill.onCellTap(source.state, cell, this);
-      if (executed) {
-        source.state.recordSkill(skill);
-      }
-    } else {
-      focusCell = (focusCell == cell) ? null : cell;
-    }
-  }
-
-  void onCellLongPress(CellComponent cell) {
-    print('Long press on cell: ${cell.gridX}, ${cell.gridY}');
-  }
-
-  // --- 范围层 / 预览单位 ---
-
-  /// 刷新范围层（供 Skill 内部在不改变焦点的情况下手动触发）
-  void updateRangeLayer() {
-    _updateRangeLayer();
-  }
-
-  void _updateRangeLayer() {
-    final unit = focusUnit;
-    if (unit != null && turnManager.activeUnit == unit.state) {
-      final highlights = unit.state.focusSkill.getHighlightPositions(unit.state, this);
-      rangeLayer.updateRanges(highlights);
-    } else {
-      rangeLayer.clear();
-    }
-  }
-
-  void updatePreviewUnit() {
-    _updatePreviewUnit();
-  }
-
-  void _updatePreviewUnit() {
-    final unit = focusUnit;
-    final previewPos = unit?.state.previewPosition;
-
-    if (previewPos != null) {
-      if (_previewUnit == null) {
-        final projectionState = UnitState(unit: unit!.state.unit, x: previewPos.x, y: previewPos.y);
-        _previewUnit = UnitComponent(state: projectionState)..visualOpacity = 0.5;
-        unitLayer.add(_previewUnit!);
-      } else if (_previewUnit!.gridX != previewPos.x || _previewUnit!.gridY != previewPos.y) {
-        unitLayer.remove(_previewUnit!);
-        final projectionState = UnitState(unit: unit!.state.unit, x: previewPos.x, y: previewPos.y);
-        _previewUnit = UnitComponent(state: projectionState)..visualOpacity = 0.5;
-        unitLayer.add(_previewUnit!);
-      }
-    } else {
-      if (_previewUnit != null) {
-        unitLayer.remove(_previewUnit!);
-        _previewUnit = null;
-      }
-    }
-  }
-
   // --- 缩放逻辑 ---
   @override
   void onScroll(PointerScrollInfo info) {
+    if (_isTransitioning || _mode == GameMode.exploration) return;
+
     final scrollDelta = info.scrollDelta.global.y;
     final currentZoom = camera.viewfinder.zoom;
 
@@ -370,6 +357,6 @@ class AlebelGame extends FlameGame with ScrollDetector, PanDetector, MouseMoveme
 
     final minZoom = _getMinZoom();
     camera.viewfinder.zoom = newZoom.clamp(minZoom, 10.0);
-    _clampCamera();
+    clampCamera();
   }
 }

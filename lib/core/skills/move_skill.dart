@@ -9,7 +9,7 @@ class MoveSkill extends Skill {
   int? _lastPoints;
 
   // Helper to ensure paths are up to date
-  void _ensurePaths(UnitState state, AlebelGame game) {
+  void _ensurePaths(UnitState state, BoardComponent board) {
     final startPos = (x: state.x, y: state.y);
     final points = state.currentActionPoints;
     // Only recalc if needed
@@ -18,18 +18,18 @@ class MoveSkill extends Skill {
         _lastPoints != points ||
         _currentPaths.isEmpty) {
       // Use currentActionPoints as the move power limit
-      _currentPaths = game.gameMap.getMovablePositions(startPos, points);
+      _currentPaths = board.gameMap.getMovablePositions(startPos, points);
       _lastCalcPos = startPos;
       _lastPoints = points;
     }
   }
 
   @override
-  List<({int x, int y, Color color})> getHighlightPositions(UnitState state, AlebelGame game) {
+  List<({int x, int y, Color color})> getHighlightPositions(UnitState state, BoardComponent board) {
     final highlights = <({int x, int y, Color color})>[];
 
     // 1. Always calculate and show move range (Blue)
-    _ensurePaths(state, game);
+    _ensurePaths(state, board);
     final reachableSet = <Position>{};
     for (final path in _currentPaths) {
       reachableSet.addAll(path);
@@ -45,7 +45,7 @@ class MoveSkill extends Skill {
     if (state.previewPosition != null) {
       final target = state.previewPosition!;
       final attackRange = state.unit.attackRange;
-      final attackablePositions = _getAttackablePositions(target, attackRange, game);
+      final attackablePositions = _getAttackablePositions(target, attackRange, board);
 
       for (final pos in attackablePositions) {
         // Since RangeLayer uses a Map internally, last added color wins.
@@ -58,46 +58,46 @@ class MoveSkill extends Skill {
   }
 
   @override
-  bool onCellTap(UnitState state, CellComponent cell, AlebelGame game) {
-    if (game.turnManager.activeUnit != state) {
+  bool onCellTap(UnitState state, CellComponent cell, BoardComponent board) {
+    if (board.turnManager.activeUnit != state) {
       // 不是该单位的回合，放弃焦点，切到点击的格子
-      game.focusCell = cell;
+      board.focusCell = cell;
       return false;
     }
 
-    _ensurePaths(state, game);
+    _ensurePaths(state, board);
     final targetPos = (x: cell.gridX, y: cell.gridY);
 
     if (!_isReachable(targetPos)) {
       // 不可达 → 放弃当前单位，焦点切到点击的格子
-      game.focusCell = cell;
+      board.focusCell = cell;
       return false;
     }
 
     // 检查目标位置是否被可见单位阻挡
-    final targetUnit = game.unitLayer.getUnitAt(targetPos.x, targetPos.y);
+    final targetUnit = board.unitLayer.getUnitAt(targetPos.x, targetPos.y);
     if (targetUnit != null) {
       if (targetUnit.state != state) {
-        final cellState = game.gameMap.getCell(targetPos.x, targetPos.y);
+        final cellState = board.gameMap.getCell(targetPos.x, targetPos.y);
         if (cellState.isCenterVisible) {
           // 被可见单位阻挡 → 焦点切到该格子
-          game.focusCell = cell;
+          board.focusCell = cell;
           return false;
         }
       } else {
-        game.focusCell = null;
+        board.focusCell = null;
         return false;
       }
     }
 
     // 可达且未阻挡
     if (state.previewPosition?.x == targetPos.x && state.previewPosition?.y == targetPos.y) {
-      _confirmMovement(state, game);
+      _confirmMovement(state, board);
       return true;
     } else {
       state.previewPosition = targetPos;
-      game.updateRangeLayer();
-      game.updatePreviewUnit();
+      board.updateRangeLayer();
+      board.updatePreviewUnit();
       return false;
     }
   }
@@ -112,7 +112,7 @@ class MoveSkill extends Skill {
     return false;
   }
 
-  Future<void> _confirmMovement(UnitState state, AlebelGame game) async {
+  Future<void> _confirmMovement(UnitState state, BoardComponent board) async {
     final target = state.previewPosition;
     if (target == null) return;
 
@@ -126,10 +126,10 @@ class MoveSkill extends Skill {
     }
 
     if (path != null) {
-      final unitComponent = game.unitLayer.getUnitAt(state.x, state.y);
+      final unitComponent = board.unitLayer.getUnitAt(state.x, state.y);
       if (unitComponent == null) return;
 
-      game.focusCell = null;
+      board.focusCell = null;
 
       // Move step by step
       // path[0] is current position (or start position), we start moving to path[1]
@@ -150,19 +150,19 @@ class MoveSkill extends Skill {
         final endPoint = path.last;
 
         // Check Terrain
-        if (game.gameMap.blocksPass(endPoint.x, endPoint.y)) {
+        if (board.gameMap.blocksPass(endPoint.x, endPoint.y)) {
           blocked = true;
           print("Movement blocked by terrain at ${endPoint.x}, ${endPoint.y}");
         }
 
         // Check Unit
         if (!blocked) {
-          final isCenterVisible = game.gameMap.getCell(endPoint.x, endPoint.y).isCenterVisible;
+          final isCenterVisible = board.gameMap.getCell(endPoint.x, endPoint.y).isCenterVisible;
           if (!isCenterVisible) {
             blocked = false;
             print("Movement blocked by center visibility at ${endPoint.x}, ${endPoint.y}");
           } else {
-            final otherUnit = game.unitLayer.getUnitAt(endPoint.x, endPoint.y);
+            final otherUnit = board.unitLayer.getUnitAt(endPoint.x, endPoint.y);
             if (otherUnit != null && otherUnit != unitComponent) {
               blocked = true;
               print("Movement blocked by unit at ${endPoint.x}, ${endPoint.y}");
@@ -182,7 +182,7 @@ class MoveSkill extends Skill {
         );
 
         final completer = Completer<void>();
-        game.add(
+        board.add(
           MoveToEffect(
             targetPos,
             EffectController(speed: 200),
@@ -195,7 +195,7 @@ class MoveSkill extends Skill {
               state.currentActionPoints--;
 
               // Reveal Fog
-              game.updateFog();
+              board.updateFog();
               completer.complete();
             },
           ),
@@ -205,7 +205,7 @@ class MoveSkill extends Skill {
 
         // Check if current position is valid for stopping
         // If there is no unit at current position (except self), update lastValidPos
-        final unitAtCurrent = game.unitLayer.getUnitAt(state.x, state.y);
+        final unitAtCurrent = board.unitLayer.getUnitAt(state.x, state.y);
         if (unitAtCurrent == null || unitAtCurrent == unitComponent) {
           lastValidPos = nextPoint;
         }
@@ -251,13 +251,13 @@ class MoveSkill extends Skill {
         );
 
         final completer = Completer<void>();
-        game.add(
+        board.add(
           MoveToEffect(
             targetPos,
             EffectController(speed: 300),
             target: unitComponent,
             onComplete: () {
-              game.updateFog(); // Update fog again at final pos
+              board.updateFog(); // Update fog again at final pos
               completer.complete();
             },
           ),
@@ -267,18 +267,18 @@ class MoveSkill extends Skill {
 
       // 重置技能并重新聚焦到移动后的位置
       state.focusSkill = state.unit.moveSkill;
-      game.focusCell = game.gridLayer.getCell(state.x, state.y);
+      board.focusCell = board.gridLayer.getCell(state.x, state.y);
     }
   }
 
-  List<Position> _getAttackablePositions(Position center, int range, AlebelGame game) {
+  List<Position> _getAttackablePositions(Position center, int range, BoardComponent board) {
     final positions = <Position>[];
     for (var dx = -range; dx <= range; dx++) {
       for (var dy = -range; dy <= range; dy++) {
         if (dx.abs() + dy.abs() <= range) {
           final x = center.x + dx;
           final y = center.y + dy;
-          if (x >= 0 && x < game.gameMap.width && y >= 0 && y < game.gameMap.height) {
+          if (x >= 0 && x < board.gameMap.width && y >= 0 && y < board.gameMap.height) {
             if (dx == 0 && dy == 0) continue;
             positions.add((x: x, y: y));
           }

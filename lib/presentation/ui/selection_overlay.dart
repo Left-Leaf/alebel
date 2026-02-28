@@ -17,13 +17,13 @@ class SelectionOverlay extends PositionComponent
   @override
   void render(Canvas canvas) {
     // 渲染悬停状态
-    final hovered = game.hoveredCell;
+    final hovered = game.board.hoveredCell;
     if (hovered != null) {
       canvas.drawRect(hovered.rect, _hoverBorderPaint);
     }
 
     // 渲染选中状态
-    final selected = game.focusCell;
+    final selected = game.board.focusCell;
     if (selected != null) {
       canvas.drawRect(selected.rect, _selectedPaint);
     }

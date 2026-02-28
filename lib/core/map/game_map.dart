@@ -51,14 +51,16 @@ class GameMap implements BoardImpl {
 
   /// 方便的工厂方法：创建一个默认的标准地图
   factory GameMap.standard() {
-    // 创建一个 20x20 的空地图，并在中间加一些墙壁测试
+    const size = 40;
+    const border = 2; // 外围边界厚度
     final matrix = List.generate(
-      20,
-      (y) => List.generate(20, (x) {
-        // 在 (5,5) 到 (5,10) 创建墙壁
-        if (x == 5 && y >= 5 && y <= 10) return 1;
-        // 在 (10,10) 创建一个水坑
-        if (x == 10 && y == 10) return 2;
+      size,
+      (y) => List.generate(size, (x) {
+        // 外围边界 (Wall)
+        if (x < border || x >= size - border || y < border || y >= size - border) return 1;
+        // 内部障碍
+        if (x == 10 && y >= 10 && y <= 15) return 1;
+        if (x == 20 && y == 20) return 2;
         return 0;
       }),
     );

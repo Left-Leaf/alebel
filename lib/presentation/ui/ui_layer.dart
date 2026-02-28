@@ -4,6 +4,7 @@ import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/game_mode.dart';
 import '../../core/skills/skill.dart';
 import '../../game/alebel_game.dart';
 
@@ -11,6 +12,7 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
   late TextComponent _infoText;
   late TurnOrderDisplay _turnOrderDisplay;
   late EndTurnButton _endTurnButton;
+  late DebugModeButton _debugModeButton;
   final List<SkillButton> _skillButtons = [];
 
   @override
@@ -36,6 +38,9 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
 
     _endTurnButton = EndTurnButton();
     add(_endTurnButton);
+
+    _debugModeButton = DebugModeButton();
+    add(_debugModeButton);
   }
 
   @override
@@ -45,6 +50,7 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
     _updateButtonPositions();
     _endTurnButton.position = Vector2(size.x - 120, size.y - 70);
     _turnOrderDisplay.position = Vector2(size.x - 20, 20);
+    _debugModeButton.position = Vector2((size.x - _debugModeButton.width) / 2, 20);
   }
 
   void _updateButtonPositions() {
@@ -59,8 +65,14 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
   void update(double dt) {
     super.update(dt);
 
-    // 更新显示的文本信息
-    final unit = game.focusUnit;
+    if (game.mode == GameMode.exploration) {
+      _infoText.text = 'Exploration Mode';
+      _clearSkillButtons();
+      return;
+    }
+
+    // 对战模式 UI 更新
+    final unit = game.board.focusUnit;
     if (unit != null) {
       _infoText.text =
           'Selected Unit: ${unit.state.unit.faction.name}\n'
@@ -73,7 +85,7 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
     } else {
       _clearSkillButtons();
 
-      final hoveredCell = game.hoveredCell;
+      final hoveredCell = game.board.hoveredCell;
       if (hoveredCell != null) {
         _infoText.text = 'Hovered Cell: (${hoveredCell.gridX}, ${hoveredCell.gridY})';
       } else {
@@ -83,13 +95,7 @@ class UiLayer extends PositionComponent with HasGameReference<AlebelGame> {
   }
 
   void _updateSkillButtons(List<Skill> skills) {
-    // If skills changed (count or instances), recreate buttons
-    // For simplicity, we check count and names.
-    // Assuming skills list is stable for a unit instance for now.
-
-    // If button count matches skill count, just update/ensure they are visible
     if (_skillButtons.length == skills.length) {
-      // Assuming same order/skills
       return;
     }
 
@@ -131,8 +137,10 @@ class TurnOrderDisplay extends PositionComponent with HasGameReference<AlebelGam
 
   @override
   void render(Canvas canvas) {
+    if (game.mode != GameMode.battle) return;
+
     // Current active unit
-    final active = game.turnManager.activeUnit;
+    final active = game.board.turnManager.activeUnit;
     double y = 0;
 
     if (active != null) {
@@ -149,8 +157,7 @@ class TurnOrderDisplay extends PositionComponent with HasGameReference<AlebelGam
     }
 
     // Predicted units
-    // We want to show next 3 units
-    final nextUnits = game.turnManager.getPredictedTurnOrder(3);
+    final nextUnits = game.board.turnManager.getPredictedTurnOrder(3);
 
     for (int i = 0; i < nextUnits.length; i++) {
       final u = nextUnits[i];
@@ -179,7 +186,9 @@ class SkillButton extends PositionComponent with TapCallbacks, HasGameReference<
 
   @override
   void render(Canvas canvas) {
-    final isSelected = game.focusUnit?.state.focusSkill == skill;
+    if (game.mode != GameMode.battle) return;
+
+    final isSelected = game.board.focusUnit?.state.focusSkill == skill;
 
     // 绘制按钮背景
     final rect = Rect.fromLTWH(0, 0, width, height);
@@ -198,17 +207,19 @@ class SkillButton extends PositionComponent with TapCallbacks, HasGameReference<
 
   @override
   void onTapDown(TapDownEvent event) {
-    final focusUnit = game.focusUnit;
+    if (game.mode != GameMode.battle) return;
+
+    final focusUnit = game.board.focusUnit;
     if (focusUnit == null) return;
 
     final state = focusUnit.state;
     if (state.focusSkill != skill) {
       state.focusSkill = skill;
-      game.updateRangeLayer();
+      game.board.updateRangeLayer();
     } else {
       if (skill != state.unit.moveSkill) {
         state.focusSkill = state.unit.moveSkill;
-        game.updateRangeLayer();
+        game.board.updateRangeLayer();
       }
     }
 
@@ -228,6 +239,8 @@ class EndTurnButton extends PositionComponent with TapCallbacks, HasGameReferenc
 
   @override
   void render(Canvas canvas) {
+    if (game.mode != GameMode.battle) return;
+
     final rect = Rect.fromLTWH(0, 0, width, height);
     canvas.drawRect(rect, _paint);
 
@@ -242,8 +255,49 @@ class EndTurnButton extends PositionComponent with TapCallbacks, HasGameReferenc
 
   @override
   void onTapDown(TapDownEvent event) {
+    if (game.mode != GameMode.battle) return;
+
     print("End Turn button tapped");
-    game.turnManager.endTurn();
+    game.board.turnManager.endTurn();
+    event.handled = true;
+  }
+}
+
+class DebugModeButton extends PositionComponent
+    with TapCallbacks, HasGameReference<AlebelGame> {
+  final _paint = Paint()..color = Colors.deepPurple;
+  final _textPaint = TextPaint(
+    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+  );
+
+  DebugModeButton() {
+    size = Vector2(120, 40);
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final rect = Rect.fromLTWH(0, 0, width, height);
+    canvas.drawRect(rect, _paint);
+
+    final borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawRect(rect, borderPaint);
+
+    final label = game.mode == GameMode.exploration ? 'To Battle' : 'To Explore';
+    _textPaint.render(canvas, label, Vector2(width / 2, height / 2), anchor: Anchor.center);
+  }
+
+  @override
+  void onTapDown(TapDownEvent event) {
+    if (game.isTransitioning) return;
+
+    if (game.mode == GameMode.exploration) {
+      game.startTransitionToBattle();
+    } else {
+      game.startTransitionToExploration();
+    }
     event.handled = true;
   }
 }

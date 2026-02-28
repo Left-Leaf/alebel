@@ -45,22 +45,22 @@ class CellComponent extends PositionComponent
 
   @override
   void onTapUp(TapUpEvent event) {
-    game.onCellTap(this);
+    game.board.onCellTap(this);
   }
 
   @override
   void onLongTapDown(TapDownEvent event) {
-    game.onCellLongPress(this);
+    game.board.onCellLongPress(this);
   }
 
   @override
   void onHoverEnter() {
-    game.onCellHoverEnter(this);
+    game.board.onCellHoverEnter(this);
   }
 
   @override
   void onHoverExit() {
-    game.onCellHoverExit(this);
+    game.board.onCellHoverExit(this);
   }
 
   @override
