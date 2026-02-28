@@ -1,7 +1,6 @@
 class AssetsImage {
-
   static const String imagePath = 'assets/images/';
-  static const String background = '$imagePath/background.jpg';
+  // static const String background = '$imagePath/background.jpg';
 }
 
 class AssetsSound {

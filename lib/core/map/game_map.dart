@@ -18,7 +18,7 @@ class GameMap implements BoardImpl {
   /// 从整数矩阵创建地图
   /// [matrix] 是一个二维数组，结构为 matrix[y][x]，即 List of Rows。
   /// 每一个整数代表一个 Cell ID。
-  factory GameMap.fromMatrix(List<List<int>> matrix) {
+  factory GameMap.fromMatrix(List<List<int>> matrix, CellRegistry registry) {
     if (matrix.isEmpty || matrix[0].isEmpty) {
       throw ArgumentError('Matrix cannot be empty');
     }
@@ -33,7 +33,7 @@ class GameMap implements BoardImpl {
       (x) => List.generate(height, (y) {
         // matrix 是按行存储的，所以是 matrix[y][x]
         final cellId = matrix[y][x];
-        final cellConfig = CellRegistry.get(cellId);
+        final cellConfig = registry.get(cellId);
         return CellState(cell: cellConfig, x: x, y: y);
       }),
     );
@@ -50,7 +50,7 @@ class GameMap implements BoardImpl {
   }
 
   /// 方便的工厂方法：创建一个默认的标准地图
-  factory GameMap.standard() {
+  factory GameMap.standard(CellRegistry registry) {
     const size = 40;
     const border = 2; // 外围边界厚度
     final matrix = List.generate(
@@ -64,7 +64,7 @@ class GameMap implements BoardImpl {
         return 0;
       }),
     );
-    return GameMap.fromMatrix(matrix);
+    return GameMap.fromMatrix(matrix, registry);
   }
 
   /// 更新迷雾状态

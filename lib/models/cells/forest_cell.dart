@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'cell_base.dart';
+part of 'cell_base.dart';
 
 /// ID: 3 - 森林 (阻挡视线，不阻挡移动)
 class ForestCell extends Cell {

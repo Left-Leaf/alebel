@@ -1,22 +1,21 @@
+import 'package:flame/game.dart';
+
 import 'cell_base.dart';
-import 'ground_cell.dart';
-import 'wall_cell.dart';
-import 'water_cell.dart';
-import 'forest_cell.dart';
 
 class CellRegistry {
-  static final Map<int, Cell> _cells = {
-    0: const GroundCell(),
-    1: const WallCell(),
-    2: const WaterCell(),
-    3: const ForestCell(),
-  };
+  final Map<int, Cell> _cells = {};
 
-  static void register(int id, Cell cell) {
-    _cells[id] = cell;
+  /// 注册所有 Cell 并为 SpriteCell 加载精灵图
+  Future<void> register(FlameGame game, Map<int, Cell> cells) async {
+    _cells.addAll(cells);
+    for (final cell in _cells.values) {
+      if (cell is SpriteCell) {
+        await cell.loadSprite(game.images);
+      }
+    }
   }
 
-  static Cell get(int id) {
-    return _cells[id] ?? const GroundCell();
+  Cell get(int id) {
+    return _cells[id] ?? GroundCell();
   }
 }

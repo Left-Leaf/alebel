@@ -11,7 +11,6 @@ import '../models/units/basic_soldier.dart';
 import '../models/units/unit_base.dart';
 import '../presentation/components/animatable_iso_decorator.dart';
 import '../presentation/components/cell_component.dart';
-
 import '../presentation/components/origin_point.dart';
 import '../presentation/components/unit_component.dart';
 import '../presentation/layers/fog_layer.dart';
@@ -81,8 +80,8 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
   // 预览/投影单位 (Ghost Unit)
   UnitComponent? _previewUnit;
 
-  // 棋盘外围边界宽度
-  static const double borderWidth = CellComponent.cellSize;
+  // 棋盘外围边界宽度（无边界）
+  static const double borderWidth = 0;
 
   @override
   Future<void> onLoad() async {
@@ -90,7 +89,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     decorator.addLast(_isoDecorator);
 
     turnManager = TurnManager();
-    gameMap = GameMap.standard();
+    gameMap = GameMap.standard(game.cellRegistry);
 
     // 计算网格和边界的偏移量
     final boardOffset = Vector2(borderWidth, borderWidth);
@@ -143,7 +142,12 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
   /// 初始化对战（添加敌方单位、注册回调、开始战斗）
   void initBattle() {
     // 添加额外的玩家单位和敌方单位
-    _addUnit(playerUnit!.gridX + 2, playerUnit!.gridY + 1, Colors.blue, faction: UnitFaction.player);
+    _addUnit(
+      playerUnit!.gridX + 2,
+      playerUnit!.gridY + 1,
+      Colors.blue,
+      faction: UnitFaction.player,
+    );
     _addUnit(playerUnit!.gridX + 4, playerUnit!.gridY + 4, Colors.red, faction: UnitFaction.enemy);
 
     turnManager.onUnitTurnStart = (unit) {
@@ -213,10 +217,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
   Vector2 projectLocal(Vector2 point) {
     if (isoFactor < 0.001) return point.clone();
     final (m00, m01, m10, m11) = _isoDecorator.matrixComponents;
-    return Vector2(
-      point.x * m00 + point.y * m01,
-      point.x * m10 + point.y * m11,
-    );
+    return Vector2(point.x * m00 + point.y * m01, point.x * m10 + point.y * m11);
   }
 
   // --- 坐标转换覆写（支持插值的等角投影） ---
@@ -257,10 +258,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
 
   Vector2 _applyIso(Vector2 v) {
     final (m00, m01, m10, m11) = _isoDecorator.matrixComponents;
-    return Vector2(
-      v.x * m00 + v.y * m01,
-      v.x * m10 + v.y * m11,
-    );
+    return Vector2(v.x * m00 + v.y * m01, v.x * m10 + v.y * m11);
   }
 
   // --- 悬停逻辑 ---

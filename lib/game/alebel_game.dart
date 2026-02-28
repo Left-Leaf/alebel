@@ -5,9 +5,10 @@ import 'package:flame/events.dart';
 import 'package:flame/game.dart';
 
 import '../core/game_mode.dart';
+import '../models/cells/cell_base.dart';
+import '../models/cells/cell_registry.dart';
 import '../presentation/components/cell_component.dart';
 import '../presentation/components/isometric_component.dart';
-import '../presentation/layers/background_layer.dart';
 import '../presentation/ui/ui_layer.dart';
 import 'board_component.dart';
 import 'exploration_controller.dart';
@@ -15,6 +16,7 @@ import 'exploration_controller.dart';
 class AlebelGame extends FlameGame
     with ScrollDetector, PanDetector, MouseMovementDetector, HasKeyboardHandlerComponents {
   late final BoardComponent board;
+  late final CellRegistry cellRegistry;
 
   /// 投影后的棋盘包围盒（原点 + 尺寸），用于相机限制
   late Vector2 _projectedBoardOrigin;
@@ -51,6 +53,15 @@ class AlebelGame extends FlameGame
 
   @override
   Future<void> onLoad() async {
+    // 注册 Cell 类型并加载精灵图
+    cellRegistry = CellRegistry();
+    await cellRegistry.register(this, {
+      0: GroundCell(),
+      1: WallCell(),
+      2: WaterCell(),
+      3: const ForestCell(),
+    });
+
     board = BoardComponent();
     world.add(board);
 
@@ -79,9 +90,6 @@ class AlebelGame extends FlameGame
 
     // 初始 zoom = 2.0（探索近距离视角）
     camera.viewfinder.zoom = 2.0;
-
-    // 背景层不参与等角投影，直接铺满投影后的包围盒区域
-    world.add(BackgroundLayer()..priority = -1);
 
     // 添加 UI 层 (添加到视口，使其固定在屏幕上)
     camera.viewport.add(UiLayer());
@@ -249,10 +257,7 @@ class AlebelGame extends FlameGame
   }
 
   static Vector2 _lerpV2(Vector2 a, Vector2 b, double t) {
-    return Vector2(
-      a.x + (b.x - a.x) * t,
-      a.y + (b.y - a.y) * t,
-    );
+    return Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
   }
 
   // --- 相机限制逻辑 ---
@@ -277,10 +282,16 @@ class AlebelGame extends FlameGame
 
     // 使用投影包围盒的原点偏移量来正确计算 clamp 范围
     final minX = _projectedBoardOrigin.x + viewportWidth / 2;
-    final maxX = math.max(minX, _projectedBoardOrigin.x + _projectedBoardSize.x - viewportWidth / 2);
+    final maxX = math.max(
+      minX,
+      _projectedBoardOrigin.x + _projectedBoardSize.x - viewportWidth / 2,
+    );
 
     final minY = _projectedBoardOrigin.y + viewportHeight / 2;
-    final maxY = math.max(minY, _projectedBoardOrigin.y + _projectedBoardSize.y - viewportHeight / 2);
+    final maxY = math.max(
+      minY,
+      _projectedBoardOrigin.y + _projectedBoardSize.y - viewportHeight / 2,
+    );
 
     final x = camera.viewfinder.position.x.clamp(minX, maxX);
     final y = camera.viewfinder.position.y.clamp(minY, maxY);
