@@ -1,3 +1,4 @@
+import 'package:alebel/common/constants.dart';
 import 'package:alebel/game/alebel_game.dart';
 import 'package:alebel/core/map/cell_state.dart';
 import 'package:flame/components.dart';
@@ -6,7 +7,7 @@ import 'package:flutter/material.dart';
 
 class CellComponent extends PositionComponent
     with TapCallbacks, HoverCallbacks, HasGameReference<AlebelGame> {
-  static const double cellSize = 50.0;
+  static const double cellSize = GameConstants.cellSize;
 
   final CellState state;
 

@@ -8,7 +8,10 @@ class AttackSkill extends Skill {
   List<({int x, int y, Color color})> getHighlightPositions(UnitState state, BoardComponent board) {
     final startPos = (x: state.x, y: state.y);
     final attackRange = state.unit.attackRange;
-    final attackablePositions = _getAttackablePositions(startPos, attackRange, board);
+    final attackablePositions = Skill.getPositionsInRange(
+      startPos, attackRange,
+      mapWidth: board.gameMap.width, mapHeight: board.gameMap.height,
+    );
 
     return attackablePositions.map((pos) => (
       x: pos.x,
@@ -39,10 +42,16 @@ class AttackSkill extends Skill {
       final distance = (cell.gridX - state.x).abs() + (cell.gridY - state.y).abs();
       if (distance <= state.unit.attackRange) {
         print('Attacking unit at ${cell.gridX}, ${cell.gridY}');
-        // TODO: Implement damage logic
 
-        // Attack performed, end turn
-        // board.turnManager.endTurn();
+        // 造成伤害
+        final targetState = target!.state;
+        final damage = targetState.takeDamage(state.currentAttack);
+        board.eventBus.fire(UnitDamagedEvent(unit: targetState, damage: damage));
+
+        // 检查死亡
+        if (targetState.isDead) {
+          board.handleUnitDeath(targetState);
+        }
 
         // Switch back to MoveSkill
         _switchToMove(state, board);
@@ -61,23 +70,5 @@ class AttackSkill extends Skill {
   void _switchToMove(UnitState state, BoardComponent board) {
     state.focusSkill = state.unit.moveSkill;
     board.updateRangeLayer();
-  }
-
-  // Helper from MoveSkill (duplicated for now as it's not exposed elsewhere cleanly)
-  List<Position> _getAttackablePositions(Position center, int range, BoardComponent board) {
-    final positions = <Position>[];
-    for (var dx = -range; dx <= range; dx++) {
-      for (var dy = -range; dy <= range; dy++) {
-        if (dx.abs() + dy.abs() <= range) {
-          final x = center.x + dx;
-          final y = center.y + dy;
-          if (x >= 0 && x < board.gameMap.width && y >= 0 && y < board.gameMap.height) {
-            if (dx == 0 && dy == 0) continue;
-            positions.add((x: x, y: y));
-          }
-        }
-      }
-    }
-    return positions;
   }
 }

@@ -4,6 +4,7 @@ import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/services.dart';
 
+import '../common/constants.dart';
 import '../core/game_mode.dart';
 import '../presentation/components/cell_component.dart';
 import 'alebel_game.dart';
@@ -11,7 +12,7 @@ import 'board_component.dart';
 
 class ExplorationController extends Component
     with KeyboardHandler, HasGameReference<AlebelGame> {
-  static const double _moveInterval = 0.15;
+  static const double _moveInterval = GameConstants.explorationMoveInterval;
 
   double _moveTimer = 0;
   bool _isMoving = false;
@@ -68,11 +69,11 @@ class ExplorationController extends Component
   }
 
   void _tryMove(int dx, int dy) {
-    final pu = game.board.playerUnit;
-    if (pu == null) return;
+    final explorer = game.board.explorer;
+    if (explorer == null) return;
 
-    final newX = pu.state.x + dx;
-    final newY = pu.state.y + dy;
+    final newX = explorer.gridX + dx;
+    final newY = explorer.gridY + dy;
 
     // 边界检查
     if (newX < 0 || newX >= game.board.gameMap.width ||
@@ -86,8 +87,8 @@ class ExplorationController extends Component
 
     // 通过 → 更新位置并播放短动画
     _isMoving = true;
-    pu.state.x = newX;
-    pu.state.y = newY;
+    explorer.gridX = newX;
+    explorer.gridY = newY;
 
     final targetPos = Vector2(
       (newX + 0.5) * CellComponent.cellSize,
@@ -99,7 +100,7 @@ class ExplorationController extends Component
       MoveToEffect(
         targetPos,
         EffectController(duration: 0.1),
-        target: pu,
+        target: explorer,
         onComplete: () {
           game.board.updateFog();
           _isMoving = false;
@@ -113,11 +114,11 @@ class ExplorationController extends Component
   }
 
   void _updateCameraFollow() {
-    final pu = game.board.playerUnit;
-    if (pu == null) return;
+    final explorer = game.board.explorer;
+    if (explorer == null) return;
     game.camera.viewfinder.position = Vector2(
-      BoardComponent.borderWidth + (pu.state.x + 0.5) * CellComponent.cellSize,
-      BoardComponent.borderWidth + (pu.state.y + 0.5) * CellComponent.cellSize,
+      BoardComponent.borderWidth + (explorer.gridX + 0.5) * CellComponent.cellSize,
+      BoardComponent.borderWidth + (explorer.gridY + 0.5) * CellComponent.cellSize,
     );
     game.clampCamera();
   }

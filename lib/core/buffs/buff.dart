@@ -1,5 +1,9 @@
 import '../unit/unit_state.dart';
 
+part 'poison_buff.dart';
+part 'attack_boost_buff.dart';
+part 'speed_debuff_buff.dart';
+
 sealed class Buff {
   String get id;
   String get name;

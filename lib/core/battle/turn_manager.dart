@@ -1,19 +1,25 @@
+import '../../common/constants.dart';
+import '../events/event_bus.dart';
+import '../events/game_event.dart';
 import '../unit/unit_state.dart';
 
-// 行动槽最大值
-const double maxActionGauge = 1000.0;
+const double maxActionGauge = GameConstants.maxActionGauge;
 
 class TurnManager {
   final List<UnitState> _units = [];
-  
+
   // 行动队列 (当前已满的单位)
   final List<UnitState> _actionQueue = [];
-  
+
   UnitState? _activeUnit;
-  
+
+  /// 事件总线（由外部注入）
+  EventBus? eventBus;
+
   // 事件回调
   void Function(UnitState unit)? onUnitTurnStart;
   void Function(UnitState unit)? onUnitTurnEnd;
+  void Function(UnitState unit)? onUnitDeath;
 
   UnitState? get activeUnit => _activeUnit;
   List<UnitState> get actionQueue => List.unmodifiable(_actionQueue);
@@ -66,6 +72,7 @@ class TurnManager {
       print("Turn End: ${unit.unit.faction} Unit. AP reset to ${unit.currentActionPoints}");
 
       onUnitTurnEnd?.call(unit);
+      eventBus?.fire(TurnEndEvent(unit: unit));
       _activeUnit = null;
     }
     
@@ -205,18 +212,26 @@ class TurnManager {
     // 记录新回合
     unit.beginTurnRecord();
 
-    // 注意：行动点恢复逻辑已移动到 endTurn
-    // 这里只负责触发回合开始事件
-    
     // 处理 Buff 回合开始
     for (final buff in unit.buffs) {
       buff.onTurnStart(unit);
     }
-    // 可能 Buff 会影响属性，所以确保属性最新（onTurnStart 可能会修改 buff 状态）
-    // 但通常 apply 已经在 add/remove 时调用了。
-    // 如果 Buff 有“每回合造成伤害”等逻辑，这里处理。
-    
+
+    // Buff 可能造成伤害（如毒），检查死亡
+    if (unit.isDead) {
+      _activeUnit = null;
+      onUnitDeath?.call(unit);
+      // 继续下一个单位
+      if (_actionQueue.isNotEmpty) {
+        _startUnitTurn(_actionQueue.removeAt(0));
+      } else {
+        _tick();
+      }
+      return;
+    }
+
     print("Turn Start: ${unit.unit.faction} Unit at (${unit.x}, ${unit.y}) AP: ${unit.currentActionPoints}");
+    eventBus?.fire(TurnStartEvent(unit: unit));
     onUnitTurnStart?.call(unit);
   }
 }

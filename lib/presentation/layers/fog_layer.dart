@@ -2,6 +2,7 @@ import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/material.dart';
 
+import '../../common/constants.dart';
 import '../../core/map/cell_state.dart'; // 导入 FogState
 import '../../core/map/game_map.dart';
 import '../components/cell_component.dart';
@@ -55,11 +56,11 @@ class FogCellComponent extends PositionComponent with HasPaint {
   double _getOpacityForState(FogState state) {
     switch (state) {
       case FogState.visible:
-        return 0.0;
+        return GameConstants.fogVisibleOpacity;
       case FogState.explored:
-        return 0.5;
+        return GameConstants.fogExploredOpacity;
       case FogState.unknown:
-        return 1.0;
+        return GameConstants.fogUnknownOpacity;
     }
   }
 
@@ -69,7 +70,7 @@ class FogCellComponent extends PositionComponent with HasPaint {
     double targetOpacity = _getOpacityForState(cellState.fogState);
     if (targetOpacity != opacity) {
       removeAll(children.whereType<Effect>().toList());
-      add(OpacityEffect.to(targetOpacity, EffectController(duration: 0.25)));
+      add(OpacityEffect.to(targetOpacity, EffectController(duration: GameConstants.fogFadeDuration)));
     }
   }
 

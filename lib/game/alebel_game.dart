@@ -4,6 +4,7 @@ import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
 
+import '../common/constants.dart';
 import '../core/game_mode.dart';
 import '../models/cells/cell_base.dart';
 import '../models/cells/cell_registry.dart';
@@ -32,7 +33,7 @@ class AlebelGame extends FlameGame
   // 过渡动画状态
   bool _isTransitioning = false;
   double _transitionProgress = 0.0;
-  static const double _transitionDuration = 1.5;
+  static const double _transitionDuration = GameConstants.transitionDuration;
 
   // 过渡方向
   bool _transitionToBattle = true;
@@ -49,7 +50,7 @@ class AlebelGame extends FlameGame
   bool _isDragging = false;
 
   // 常量
-  static const double _dragThreshold = 5.0;
+  static const double _dragThreshold = GameConstants.dragThreshold;
 
   @override
   Future<void> onLoad() async {
@@ -74,22 +75,15 @@ class AlebelGame extends FlameGame
     // 设置相机锚点
     camera.viewfinder.anchor = Anchor.center;
 
-    // 初始相机位置 = 玩家 Unit 世界坐标
-    final pu = board.playerUnit;
-    if (pu != null) {
-      camera.viewfinder.position = Vector2(
-        BoardComponent.borderWidth + (pu.state.x + 0.5) * CellComponent.cellSize,
-        BoardComponent.borderWidth + (pu.state.y + 0.5) * CellComponent.cellSize,
-      );
-    } else {
-      camera.viewfinder.position = Vector2(
-        _projectedBoardOrigin.x + _projectedBoardSize.x / 2,
-        _projectedBoardOrigin.y + _projectedBoardSize.y / 2,
-      );
-    }
+    // 初始相机位置 = 玩家位置世界坐标
+    final pos = board.playerGridPosition;
+    camera.viewfinder.position = Vector2(
+      BoardComponent.borderWidth + (pos.x + 0.5) * CellComponent.cellSize,
+      BoardComponent.borderWidth + (pos.y + 0.5) * CellComponent.cellSize,
+    );
 
-    // 初始 zoom = 2.0（探索近距离视角）
-    camera.viewfinder.zoom = 2.0;
+    // 初始 zoom = 探索近距离视角
+    camera.viewfinder.zoom = GameConstants.explorationZoom;
 
     // 添加 UI 层 (添加到视口，使其固定在屏幕上)
     camera.viewport.add(UiLayer());
@@ -129,10 +123,10 @@ class AlebelGame extends FlameGame
   // --- 辅助：计算玩家单位在棋盘本地坐标 ---
 
   Vector2 _playerLocalPos() {
-    final pu = board.playerUnit!;
+    final pos = board.playerGridPosition;
     return Vector2(
-      BoardComponent.borderWidth + (pu.state.x + 0.5) * CellComponent.cellSize,
-      BoardComponent.borderWidth + (pu.state.y + 0.5) * CellComponent.cellSize,
+      BoardComponent.borderWidth + (pos.x + 0.5) * CellComponent.cellSize,
+      BoardComponent.borderWidth + (pos.y + 0.5) * CellComponent.cellSize,
     );
   }
 
@@ -155,7 +149,7 @@ class AlebelGame extends FlameGame
     _endWorldPos = IsometricComponent.project(_pivotLocal.x, _pivotLocal.y);
 
     // 目标 zoom = 适度缩小，仅比探索视角稍远
-    _endZoom = 1.0;
+    _endZoom = GameConstants.battleZoom;
 
     _transitionProgress = 0.0;
     _isTransitioning = true;
@@ -177,7 +171,7 @@ class AlebelGame extends FlameGame
 
     // 最终目标 = 玩家 Unit 在俯视视角下的世界坐标（= 本地坐标）
     _endWorldPos = _pivotLocal.clone();
-    _endZoom = 2.0;
+    _endZoom = GameConstants.explorationZoom;
 
     _transitionProgress = 0.0;
     _isTransitioning = true;
@@ -361,13 +355,13 @@ class AlebelGame extends FlameGame
 
     double newZoom = currentZoom;
     if (scrollDelta < 0) {
-      newZoom = currentZoom * 1.1;
+      newZoom = currentZoom * GameConstants.zoomInMultiplier;
     } else if (scrollDelta > 0) {
-      newZoom = currentZoom * 0.9;
+      newZoom = currentZoom * GameConstants.zoomOutMultiplier;
     }
 
     final minZoom = _getMinZoom();
-    camera.viewfinder.zoom = newZoom.clamp(minZoom, 10.0);
+    camera.viewfinder.zoom = newZoom.clamp(minZoom, GameConstants.maxZoom);
     clampCamera();
   }
 }

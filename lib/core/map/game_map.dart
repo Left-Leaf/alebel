@@ -1,3 +1,4 @@
+import '../../common/constants.dart';
 import 'cell_state.dart';
 import '../../models/cells/cell_registry.dart';
 import 'board.dart';
@@ -51,8 +52,8 @@ class GameMap implements BoardImpl {
 
   /// 方便的工厂方法：创建一个默认的标准地图
   factory GameMap.standard(CellRegistry registry) {
-    const size = 40;
-    const border = 2; // 外围边界厚度
+    const size = GameConstants.standardMapSize;
+    const border = GameConstants.standardMapBorder;
     final matrix = List.generate(
       size,
       (y) => List.generate(size, (x) {
@@ -131,5 +132,11 @@ class GameMap implements BoardImpl {
     // 如果是未知区域，视为不阻挡视线（当作空方格）
     if (cell.fogState == FogState.unknown) return false;
     return cell.blocksVision;
+  }
+
+  @override
+  bool isCellKnown(int x, int y) {
+    final cell = getCell(x, y);
+    return cell.fogState != FogState.unknown;
   }
 }

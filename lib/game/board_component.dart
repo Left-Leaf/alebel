@@ -1,16 +1,16 @@
-import 'dart:ui';
-
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart' show Colors;
 
 import '../core/battle/turn_manager.dart';
-import '../core/game_mode.dart';
+import '../core/events/event_bus.dart';
+import '../core/map/board.dart';
 import '../core/map/game_map.dart';
 import '../core/unit/unit_state.dart';
 import '../models/units/basic_soldier.dart';
 import '../models/units/unit_base.dart';
 import '../presentation/components/animatable_iso_decorator.dart';
 import '../presentation/components/cell_component.dart';
+import '../presentation/components/explorer_component.dart';
 import '../presentation/components/origin_point.dart';
 import '../presentation/components/unit_component.dart';
 import '../presentation/layers/fog_layer.dart';
@@ -19,6 +19,7 @@ import '../presentation/layers/range_layer.dart';
 import '../presentation/layers/unit_layer.dart';
 import '../presentation/ui/selection_overlay.dart';
 import 'alebel_game.dart';
+import 'battle_controller.dart';
 
 class BoardComponent extends PositionComponent with HasGameReference<AlebelGame> {
   late final GridLayer gridLayer;
@@ -27,16 +28,35 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
   late final FogLayer fogLayer;
   late GameMap gameMap;
   late final TurnManager turnManager;
+  final EventBus eventBus = EventBus();
 
   late final AnimatableIsoDecorator _isoDecorator;
 
-  /// 玩家控制的单位
+  /// 探索模式的玩家角色（非 null = 探索模式）
+  ExplorerComponent? explorer;
+
+  /// 对战模式中的玩家单位（非 null = 对战模式）
   UnitComponent? playerUnit;
 
-  // 交互状态
-  CellComponent? _hoveredCell;
+  /// 统一的玩家位置访问（探索 or 对战均可用）
+  Position get playerGridPosition {
+    if (explorer != null) return (x: explorer!.gridX, y: explorer!.gridY);
+    if (playerUnit != null) return (x: playerUnit!.gridX, y: playerUnit!.gridY);
+    throw StateError('No player entity');
+  }
 
-  CellComponent? get hoveredCell => _hoveredCell;
+  /// 战斗控制器（仅在战斗模式下存在）
+  BattleController? _battleController;
+
+  // --- 委托属性（供 Skill / SelectionOverlay 等外部使用） ---
+
+  CellComponent? get focusCell => _battleController?.focusCell;
+
+  set focusCell(CellComponent? cell) => _battleController?.focusCell = cell;
+
+  UnitComponent? get focusUnit => _battleController?.focusUnit;
+
+  CellComponent? get hoveredCell => _battleController?.hoveredCell;
 
   // --- 等角投影因子 ---
 
@@ -46,40 +66,6 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _isoDecorator.factor = value;
   }
 
-  // --- 焦点系统 ---
-
-  CellComponent? _focusCell;
-
-  CellComponent? get focusCell => _focusCell;
-
-  set focusCell(CellComponent? cell) {
-    if (_focusCell == cell) return;
-
-    // 清理旧焦点单位的状态
-    final oldUnit = focusUnit;
-    if (oldUnit != null) {
-      oldUnit.state.previewPosition = null;
-    }
-
-    // 切换 cell 选中态
-    _focusCell?.isSelected = false;
-    _focusCell = cell;
-    _focusCell?.isSelected = true;
-
-    // 联动刷新
-    _updatePreviewUnit();
-    _updateRangeLayer();
-  }
-
-  /// 当前焦点格子上的单位（派生属性）
-  UnitComponent? get focusUnit {
-    if (_focusCell == null) return null;
-    return unitLayer.getUnitAt(_focusCell!.gridX, _focusCell!.gridY);
-  }
-
-  // 预览/投影单位 (Ghost Unit)
-  UnitComponent? _previewUnit;
-
   // 棋盘外围边界宽度（无边界）
   static const double borderWidth = 0;
 
@@ -88,7 +74,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _isoDecorator = AnimatableIsoDecorator(factor: 0.0);
     decorator.addLast(_isoDecorator);
 
-    turnManager = TurnManager();
+    turnManager = TurnManager()..eventBus = eventBus;
     gameMap = GameMap.standard(game.cellRegistry);
 
     // 计算网格和边界的偏移量
@@ -132,84 +118,105 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
       }
     }
 
-    // 创建玩家 Unit（探索模式 + 对战模式都存在）
-    playerUnit = _addUnit(5, 5, Colors.blue, faction: UnitFaction.player);
+    // 创建探索模式的玩家角色（轻量 ExplorerComponent）
+    final playerDef = BasicSoldier(color: Colors.blue, faction: UnitFaction.player);
+    explorer = ExplorerComponent(unit: playerDef, gridX: 5, gridY: 5);
+    unitLayer.add(explorer!);
 
-    turnManager.registerUnit(playerUnit!.state);
     updateFog();
   }
 
-  /// 初始化对战（添加敌方单位、注册回调、开始战斗）
+  /// 初始化对战（移除 explorer、创建战斗单位、加载战斗控制器、开始战斗）
   void initBattle() {
+    // 从 explorer 读取位置和定义
+    final startX = explorer!.gridX;
+    final startY = explorer!.gridY;
+    final playerDef = explorer!.unit;
+
+    // 移除 explorer
+    unitLayer.remove(explorer!);
+    explorer = null;
+
+    // 创建玩家的对战 UnitComponent
+    playerUnit = _addUnit(startX, startY, playerDef);
+
     // 添加额外的玩家单位和敌方单位
-    _addUnit(
-      playerUnit!.gridX + 2,
-      playerUnit!.gridY + 1,
-      Colors.blue,
-      faction: UnitFaction.player,
-    );
-    _addUnit(playerUnit!.gridX + 4, playerUnit!.gridY + 4, Colors.red, faction: UnitFaction.enemy);
+    // _addUnit(startX + 2, startY + 1, BasicSoldier(color: Colors.blue, faction: UnitFaction.player));
+    _addUnit(startX + 4, startY + 4, BasicSoldier(color: Colors.red, faction: UnitFaction.enemy));
 
-    turnManager.onUnitTurnStart = (unit) {
-      print("Game: Turn started for ${unit.unit.faction}");
-      if (unit.unit.faction == UnitFaction.player) {
-        focusCell = gridLayer.getCell(unit.x, unit.y);
-      } else {
-        print("Enemy turn - simple pass for now");
-        Future.delayed(const Duration(seconds: 1), () {
-          turnManager.endTurn();
-        });
-      }
-    };
-
-    turnManager.onUnitTurnEnd = (unit) {
-      print("Game: Turn ended for ${unit.unit.faction}");
-      if (focusUnit?.state == unit) {
-        focusCell = null;
-      }
-    };
+    // 加载战斗控制器
+    _battleController = BattleController(board: this);
+    add(_battleController!);
+    _battleController!.setup();
 
     turnManager.startBattle();
     updateFog();
   }
 
-  /// 清除对战状态（移除敌方单位、清除焦点/范围）
+  /// 清除对战状态（卸载战斗控制器、移除所有战斗单位、重新创建 explorer）
   void teardownBattle() {
-    // 清除焦点
-    focusCell = null;
-    rangeLayer.clear();
+    // 卸载战斗控制器
+    _battleController?.cleanup();
+    _battleController?.removeFromParent();
+    _battleController = null;
 
-    // 移除非玩家单位
-    final toRemove = unitLayer.units.where((u) => u != playerUnit).toList();
-    for (final unit in toRemove) {
+    // 记录玩家最终位置和定义
+    final endX = playerUnit?.gridX ?? 5;
+    final endY = playerUnit?.gridY ?? 5;
+    final playerDef = playerUnit?.state.unit ??
+        BasicSoldier(color: Colors.blue, faction: UnitFaction.player);
+
+    // 移除所有对战单位
+    for (final unit in unitLayer.units.toList()) {
       turnManager.removeUnit(unit.state);
       unitLayer.removeUnit(unit);
     }
+    playerUnit = null;
 
-    // 清除回调
-    turnManager.onUnitTurnStart = null;
-    turnManager.onUnitTurnEnd = null;
+    // 重新创建 explorer
+    explorer = ExplorerComponent(unit: playerDef, gridX: endX, gridY: endY);
+    unitLayer.add(explorer!);
 
     updateFog();
   }
 
-  UnitComponent _addUnit(int x, int y, Color color, {UnitFaction faction = UnitFaction.player}) {
-    final unit = BasicSoldier(color: color, faction: faction);
-    final unitState = UnitState(unit: unit, x: x, y: y);
+  UnitComponent _addUnit(int x, int y, Unit unitDef) {
+    final unitState = UnitState(unit: unitDef, x: x, y: y);
     final unitComponent = UnitComponent(state: unitState);
     unitLayer.addUnit(unitComponent);
-
     turnManager.registerUnit(unitState);
     return unitComponent;
   }
 
   void updateFog() {
-    final visionSources = unitLayer.units
-        .where((u) => u.faction == UnitFaction.player)
-        .map((u) => (x: u.gridX, y: u.gridY, range: u.state.currentVisionRange))
-        .toList();
+    final List<({int x, int y, int range})> visionSources;
+
+    if (explorer != null) {
+      // 探索模式：只有 explorer 提供视野
+      visionSources = [(x: explorer!.gridX, y: explorer!.gridY, range: explorer!.visionRange)];
+    } else {
+      // 对战模式：所有己方单位提供视野
+      visionSources = unitLayer.units
+          .where((u) => u.faction == UnitFaction.player)
+          .map((u) => (x: u.gridX, y: u.gridY, range: u.state.currentVisionRange))
+          .toList();
+    }
 
     gameMap.updateFog(visionSources);
+  }
+
+  // --- 委托方法（供 Skill 调用） ---
+
+  void handleUnitDeath(UnitState deadUnit) {
+    _battleController?.handleUnitDeath(deadUnit);
+  }
+
+  void updateRangeLayer() {
+    _battleController?.updateRangeLayer();
+  }
+
+  void updatePreviewUnit() {
+    _battleController?.updatePreviewUnit();
   }
 
   /// 将棋盘本地坐标通过当前 iso 矩阵投影到世界坐标。
@@ -261,83 +268,21 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     return Vector2(v.x * m00 + v.y * m01, v.x * m10 + v.y * m11);
   }
 
-  // --- 悬停逻辑 ---
+  // --- 单元格事件路由（无模式判断，由控制器存在性决定） ---
+
+  void onCellTap(CellComponent cell) {
+    _battleController?.onCellTap(cell);
+  }
+
   void onCellHoverEnter(CellComponent cell) {
-    if (game.mode != GameMode.battle) return;
-    if (_hoveredCell != cell) {
-      _hoveredCell = cell;
-    }
+    _battleController?.onCellHoverEnter(cell);
   }
 
   void onCellHoverExit(CellComponent cell) {
-    if (game.mode != GameMode.battle) return;
-    if (_hoveredCell == cell) {
-      _hoveredCell = null;
-    }
-  }
-
-  // --- 点击逻辑 ---
-
-  void onCellTap(CellComponent cell) {
-    if (game.mode != GameMode.battle) return;
-
-    final source = focusUnit;
-    if (source != null) {
-      final skill = source.state.focusSkill;
-      final executed = skill.onCellTap(source.state, cell, this);
-      if (executed) {
-        source.state.recordSkill(skill);
-      }
-    } else {
-      focusCell = (focusCell == cell) ? null : cell;
-    }
+    _battleController?.onCellHoverExit(cell);
   }
 
   void onCellLongPress(CellComponent cell) {
     print('Long press on cell: ${cell.gridX}, ${cell.gridY}');
-  }
-
-  // --- 范围层 / 预览单位 ---
-
-  /// 刷新范围层（供 Skill 内部在不改变焦点的情况下手动触发）
-  void updateRangeLayer() {
-    _updateRangeLayer();
-  }
-
-  void _updateRangeLayer() {
-    final unit = focusUnit;
-    if (unit != null && turnManager.activeUnit == unit.state) {
-      final highlights = unit.state.focusSkill.getHighlightPositions(unit.state, this);
-      rangeLayer.updateRanges(highlights);
-    } else {
-      rangeLayer.clear();
-    }
-  }
-
-  void updatePreviewUnit() {
-    _updatePreviewUnit();
-  }
-
-  void _updatePreviewUnit() {
-    final unit = focusUnit;
-    final previewPos = unit?.state.previewPosition;
-
-    if (previewPos != null) {
-      if (_previewUnit == null) {
-        final projectionState = UnitState(unit: unit!.state.unit, x: previewPos.x, y: previewPos.y);
-        _previewUnit = UnitComponent(state: projectionState)..visualOpacity = 0.5;
-        unitLayer.add(_previewUnit!);
-      } else if (_previewUnit!.gridX != previewPos.x || _previewUnit!.gridY != previewPos.y) {
-        unitLayer.remove(_previewUnit!);
-        final projectionState = UnitState(unit: unit!.state.unit, x: previewPos.x, y: previewPos.y);
-        _previewUnit = UnitComponent(state: projectionState)..visualOpacity = 0.5;
-        unitLayer.add(_previewUnit!);
-      }
-    } else {
-      if (_previewUnit != null) {
-        unitLayer.remove(_previewUnit!);
-        _previewUnit = null;
-      }
-    }
   }
 }

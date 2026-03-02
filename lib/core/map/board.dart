@@ -1,6 +1,8 @@
 typedef Position = ({int x, int y});
 typedef VisionState = ({Position position, bool center, bool edge});
 
+enum PathCertainty { confirmed, uncertain }
+
 abstract class BoardImpl {
   int get width;
 
@@ -11,22 +13,24 @@ abstract class BoardImpl {
   bool blocksVision(int x, int y);
 
   bool canStand(int x, int y);
+
+  bool isCellKnown(int x, int y);
 }
 
 extension BoardExtension on BoardImpl {
   /// 计算所有可移动位置
-  List<List<Position>> getMovablePositions(Position position, int power) {
-    List<List<Position>> paths = [];
-    final queue = <(Position, List<Position>)>[];
+  List<(List<Position>, PathCertainty)> getMovablePositions(Position position, int power) {
+    List<(List<Position>, PathCertainty)> paths = [];
+    final queue = <(Position, List<Position>, bool)>[];
     final visited = <Position>{};
 
     // Initial state
-    queue.add((position, [position]));
+    queue.add((position, [position], false));
     visited.add(position);
-    paths.add([position]);
+    paths.add(([position], PathCertainty.confirmed));
 
     while (queue.isNotEmpty) {
-      final (current, path) = queue.removeAt(0);
+      final (current, path, hasUnknown) = queue.removeAt(0);
 
       // If we have reached max power, we cannot extend further
       if (path.length - 1 >= power) continue;
@@ -50,14 +54,16 @@ extension BoardExtension on BoardImpl {
         if (!visited.contains(nextPos)) {
           visited.add(nextPos);
           final newPath = List<Position>.from(path)..add(nextPos);
+          final nextUnknown = hasUnknown || !isCellKnown(nextX, nextY);
+          final certainty = nextUnknown ? PathCertainty.uncertain : PathCertainty.confirmed;
 
           // Check if standable (can stop here)
           if (canStand(nextX, nextY)) {
-            paths.add(newPath);
+            paths.add((newPath, certainty));
           }
 
           // Add to queue to continue searching
-          queue.add((nextPos, newPath));
+          queue.add((nextPos, newPath, nextUnknown));
         }
       }
     }
