@@ -2,6 +2,8 @@ import 'dart:ui';
 
 import 'package:alebel/common/constants.dart';
 import 'package:alebel/core/battle/turn_manager.dart';
+import 'package:alebel/core/events/event_bus.dart';
+import 'package:alebel/core/events/game_event.dart';
 import 'package:alebel/core/unit/unit_state.dart';
 import 'package:alebel/models/units/basic_soldier.dart';
 import 'package:alebel/models/units/unit_base.dart';
@@ -19,9 +21,11 @@ UnitState _makeUnit({int speed = 10, UnitFaction faction = UnitFaction.player}) 
 void main() {
   group('TurnManager', () {
     late TurnManager tm;
+    late EventBus eventBus;
 
     setUp(() {
-      tm = TurnManager();
+      eventBus = EventBus();
+      tm = TurnManager(eventBus: eventBus);
     });
 
     test('registerUnit initializes action gauge', () {
@@ -52,9 +56,9 @@ void main() {
       fast.actionGauge = 0;
 
       UnitState? firstToAct;
-      tm.onUnitTurnStart = (unit) {
-        firstToAct ??= unit;
-      };
+      eventBus.on<TurnStartEvent>().listen((e) {
+        firstToAct ??= e.unit;
+      });
 
       tm.startBattle();
       expect(firstToAct, equals(fast));
@@ -70,9 +74,9 @@ void main() {
 
       // Track which units got turns
       final turnUnits = <UnitState>[];
-      tm.onUnitTurnStart = (unit) {
-        turnUnits.add(unit);
-      };
+      eventBus.on<TurnStartEvent>().listen((e) {
+        turnUnits.add(e.unit);
+      });
 
       tm.startBattle();
       // First turn should be the faster unit (u1)
@@ -99,9 +103,9 @@ void main() {
 
       // Only u2 should act
       UnitState? acted;
-      tm.onUnitTurnStart = (unit) {
-        acted = unit;
-      };
+      eventBus.on<TurnStartEvent>().listen((e) {
+        acted = e.unit;
+      });
       tm.startBattle();
       expect(acted, equals(u2));
     });
@@ -114,7 +118,8 @@ void main() {
       u1.actionGauge = 0;
       u2.actionGauge = 0;
 
-      tm.onUnitTurnStart = (_) {};
+      // Need to consume turn start to prevent infinite recursion
+      eventBus.on<TurnStartEvent>().listen((_) {});
       tm.startBattle();
 
       final order = tm.getPredictedTurnOrder(5);
@@ -129,7 +134,7 @@ void main() {
       slow.actionGauge = 0;
       fast.actionGauge = 0;
 
-      tm.onUnitTurnStart = (_) {};
+      eventBus.on<TurnStartEvent>().listen((_) {});
       tm.startBattle();
 
       final order = tm.getPredictedTurnOrder(6);

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flutter/material.dart';
@@ -257,7 +255,6 @@ class EndTurnButton extends PositionComponent with TapCallbacks, HasGameReferenc
   void onTapDown(TapDownEvent event) {
     if (game.mode != GameMode.battle) return;
 
-    print("End Turn button tapped");
     game.board.turnManager.endTurn();
     event.handled = true;
   }

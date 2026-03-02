@@ -62,14 +62,14 @@ class UnitComponent extends PositionComponent
     canvas.drawCircle(
       Offset(size.x / 2 + 2, size.y / 2 + 2),
       radius,
-      Paint()..color = Colors.black.withOpacity(0.3),
+      Paint()..color = Colors.black.withValues(alpha: 0.3),
     );
 
     // 绘制主体
     canvas.drawCircle(
       Offset(size.x / 2, size.y / 2),
       radius,
-      Paint()..color = color.withOpacity(visualOpacity),
+      Paint()..color = color.withValues(alpha: visualOpacity),
     );
 
     // 绘制边缘
@@ -77,7 +77,7 @@ class UnitComponent extends PositionComponent
       Offset(size.x / 2, size.y / 2),
       radius,
       Paint()
-        ..color = Colors.white.withOpacity(0.8 * visualOpacity)
+        ..color = Colors.white.withValues(alpha: 0.8 * visualOpacity)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0,
     );

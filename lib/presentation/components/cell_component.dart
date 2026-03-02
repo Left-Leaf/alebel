@@ -1,6 +1,7 @@
 import 'package:alebel/common/constants.dart';
 import 'package:alebel/game/alebel_game.dart';
 import 'package:alebel/core/map/cell_state.dart';
+import 'package:alebel/models/cells/cell_base.dart';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flutter/material.dart';
@@ -44,6 +45,17 @@ class CellComponent extends PositionComponent
     ..style = PaintingStyle.stroke
     ..strokeWidth = 2.0;
 
+  Sprite? _sprite;
+
+  @override
+  Future<void> onLoad() async {
+    final cell = state.cell;
+    if (cell is SpriteCell) {
+      final image = await game.images.load(cell.imagePath);
+      _sprite = Sprite(image);
+    }
+  }
+
   @override
   void onTapUp(TapUpEvent event) {
     game.board.onCellTap(this);
@@ -66,9 +78,12 @@ class CellComponent extends PositionComponent
 
   @override
   void render(Canvas canvas) {
-    // 委托给 Cell 进行自定义内容的绘制
-    // 传入 size.toSize()
-    state.cell.render(canvas, size.toSize());
+    final cell = state.cell;
+    if (_sprite != null) {
+      _sprite!.render(canvas, size: size);
+    } else if (cell is RenderCell) {
+      cell.render(canvas, size.toSize());
+    }
 
     // 绘制基础边框 (统一在 Component 层绘制，保持风格一致)
     canvas.drawRect(size.toRect(), _borderPaint);

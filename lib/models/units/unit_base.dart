@@ -1,4 +1,5 @@
 import 'dart:ui';
+import '../../core/ai/simple_ai.dart';
 import '../../core/skills/skill.dart';
 
 enum UnitFaction {
@@ -32,6 +33,9 @@ abstract class Unit {
 
   MoveSkill get moveSkill;
   List<Skill> get skills;
+
+  /// AI 策略（非玩家单位使用）
+  AIStrategy get aiStrategy => const AggressiveAI();
 
   Unit({
     required this.color,

@@ -1,8 +1,10 @@
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart' show Colors;
 
+import '../core/battle/battle_scenario.dart';
 import '../core/battle/turn_manager.dart';
 import '../core/events/event_bus.dart';
+import '../core/events/game_event.dart';
 import '../core/map/board.dart';
 import '../core/map/game_map.dart';
 import '../core/unit/unit_state.dart';
@@ -74,7 +76,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _isoDecorator = AnimatableIsoDecorator(factor: 0.0);
     decorator.addLast(_isoDecorator);
 
-    turnManager = TurnManager()..eventBus = eventBus;
+    turnManager = TurnManager(eventBus: eventBus);
     gameMap = GameMap.standard(game.cellRegistry);
 
     // 计算网格和边界的偏移量
@@ -126,8 +128,14 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     updateFog();
   }
 
+  /// 当前战斗场景（供外部传入触发战斗使用）
+  BattleScenario? pendingScenario;
+
   /// 初始化对战（移除 explorer、创建战斗单位、加载战斗控制器、开始战斗）
   void initBattle() {
+    final scenario = pendingScenario;
+    pendingScenario = null;
+
     // 从 explorer 读取位置和定义
     final startX = explorer!.gridX;
     final startY = explorer!.gridY;
@@ -140,9 +148,18 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     // 创建玩家的对战 UnitComponent
     playerUnit = _addUnit(startX, startY, playerDef);
 
-    // 添加额外的玩家单位和敌方单位
-    // _addUnit(startX + 2, startY + 1, BasicSoldier(color: Colors.blue, faction: UnitFaction.player));
-    _addUnit(startX + 4, startY + 4, BasicSoldier(color: Colors.red, faction: UnitFaction.enemy));
+    if (scenario != null) {
+      // 按场景配置生成单位
+      for (final spawn in scenario.allies) {
+        _addUnit(startX + spawn.offset.x, startY + spawn.offset.y, spawn.unit);
+      }
+      for (final spawn in scenario.enemies) {
+        _addUnit(startX + spawn.offset.x, startY + spawn.offset.y, spawn.unit);
+      }
+    } else {
+      // 无场景时的默认敌人（兼容旧调用）
+      _addUnit(startX + 4, startY + 4, BasicSoldier(color: Colors.red, faction: UnitFaction.enemy));
+    }
 
     // 加载战斗控制器
     _battleController = BattleController(board: this);
@@ -150,6 +167,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _battleController!.setup();
 
     turnManager.startBattle();
+    eventBus.fire(BattleStartEvent());
     updateFog();
   }
 
@@ -163,8 +181,8 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     // 记录玩家最终位置和定义
     final endX = playerUnit?.gridX ?? 5;
     final endY = playerUnit?.gridY ?? 5;
-    final playerDef = playerUnit?.state.unit ??
-        BasicSoldier(color: Colors.blue, faction: UnitFaction.player);
+    final playerDef =
+        playerUnit?.state.unit ?? BasicSoldier(color: Colors.blue, faction: UnitFaction.player);
 
     // 移除所有对战单位
     for (final unit in unitLayer.units.toList()) {
@@ -282,7 +300,5 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _battleController?.onCellHoverExit(cell);
   }
 
-  void onCellLongPress(CellComponent cell) {
-    print('Long press on cell: ${cell.gridX}, ${cell.gridY}');
-  }
+  void onCellLongPress(CellComponent cell) {}
 }

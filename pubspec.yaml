@@ -38,9 +38,6 @@ dependencies:
   # Game engine
   flame: ^1.18.0
 
-  # State management
-  provider: ^6.1.0
-
   # Collection utilities (priority queue for A* algorithm)
   collection: ^1.18.0
 

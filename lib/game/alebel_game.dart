@@ -5,6 +5,7 @@ import 'package:flame/events.dart';
 import 'package:flame/game.dart';
 
 import '../common/constants.dart';
+import '../core/battle/battle_scenario.dart';
 import '../core/game_mode.dart';
 import '../models/cells/cell_base.dart';
 import '../models/cells/cell_registry.dart';
@@ -54,12 +55,12 @@ class AlebelGame extends FlameGame
 
   @override
   Future<void> onLoad() async {
-    // 注册 Cell 类型并加载精灵图
+    // 注册 Cell 类型
     cellRegistry = CellRegistry();
-    await cellRegistry.register(this, {
-      0: GroundCell(),
-      1: WallCell(),
-      2: WaterCell(),
+    cellRegistry.register({
+      0: const GroundCell(),
+      1: const WallCell(),
+      2: const WaterCell(),
       3: const ForestCell(),
     });
 
@@ -136,8 +137,10 @@ class AlebelGame extends FlameGame
   ///
   /// Phase 1 (前半): isoFactor 0→1，相机始终跟踪玩家 Unit 经投影后的位置（视角中心稳定）
   /// Phase 2 (后半): isoFactor 保持 1，相机从玩家 Unit(iso) 平移到棋盘中心(iso)，同时缩放
-  void startTransitionToBattle() {
+  void startTransitionToBattle({BattleScenario? scenario}) {
     if (_isTransitioning || _mode == GameMode.battle) return;
+
+    board.pendingScenario = scenario;
 
     _transitionToBattle = true;
     _startZoom = camera.viewfinder.zoom;

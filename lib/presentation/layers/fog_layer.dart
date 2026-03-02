@@ -79,7 +79,7 @@ class FogCellComponent extends PositionComponent with HasPaint {
     // 如果完全透明，则不绘制
     if (opacity <= 0.01) return;
 
-    final paint = Paint()..color = Colors.black.withOpacity(opacity);
+    final paint = Paint()..color = Colors.black.withValues(alpha: opacity);
     canvas.drawRect(size.toRect(), paint);
   }
 }

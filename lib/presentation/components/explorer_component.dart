@@ -38,7 +38,7 @@ class ExplorerComponent extends PositionComponent
     canvas.drawCircle(
       Offset(size.x / 2 + 2, size.y / 2 + 2),
       radius,
-      Paint()..color = Colors.black.withOpacity(0.3),
+      Paint()..color = Colors.black.withValues(alpha: 0.3),
     );
 
     // Body
@@ -53,7 +53,7 @@ class ExplorerComponent extends PositionComponent
       Offset(size.x / 2, size.y / 2),
       radius,
       Paint()
-        ..color = Colors.white.withOpacity(0.8)
+        ..color = Colors.white.withValues(alpha: 0.8)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0,
     );
