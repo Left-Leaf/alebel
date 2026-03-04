@@ -6,6 +6,7 @@ import 'package:flame/effects.dart';
 import '../common/constants.dart';
 import '../core/ai/ai_action.dart';
 import '../core/battle/battle_api.dart';
+import '../core/battle/battle_effects.dart';
 import '../core/battle/battle_presenter.dart';
 import '../core/battle/turn_delegate.dart';
 import '../core/buffs/buff.dart';
@@ -23,9 +24,15 @@ import 'board_component.dart';
 /// 在进入战斗模式时加载，离开时卸载。
 /// 实现 [BattleAPI]，技能通过该接口直接执行效果和控制交互状态。
 /// 实现 [TurnDelegate]，接收 TurnManager 的回合生命周期通知。
-class BattleController extends Component implements BattleAPI, TurnDelegate {
+class BattleController extends Component with BattleEffects implements BattleAPI, TurnDelegate {
   final BoardComponent board;
   final BattlePresenter _presenter;
+
+  @override
+  BattlePresenter get presenter => _presenter;
+
+  @override
+  Future<void> onUnitKilled(UnitState unit) => _handleUnitDeath(unit);
   bool _active = true;
   bool _locked = false;
 
@@ -74,7 +81,7 @@ class BattleController extends Component implements BattleAPI, TurnDelegate {
   UnitComponent? _previewUnit;
 
   BattleController({required this.board, required BattlePresenter presenter})
-      : _presenter = presenter;
+    : _presenter = presenter;
 
   // --- SkillContext (用于 getHighlightPositions) ---
 
@@ -157,8 +164,7 @@ class BattleController extends Component implements BattleAPI, TurnDelegate {
           EffectController(speed: GameConstants.moveSpeed),
           target: unitComponent,
           onComplete: () {
-            unit.x = nextPoint.x;
-            unit.y = nextPoint.y;
+            board.turnManager.updateUnitPosition(unit, nextPoint.x, nextPoint.y);
             unit.currentActionPoints -= cost;
             board.updateFog();
             completer.complete();
@@ -180,56 +186,11 @@ class BattleController extends Component implements BattleAPI, TurnDelegate {
   }
 
   @override
-  Future<void> damageUnit(UnitState target, int amount, {UnitState? attacker}) async {
-    // 1. 目标 Buff 减伤钩子
-    var finalAmount = amount;
-    for (final buff in target.buffs) {
-      finalAmount = await buff.onDamageTaken(target, finalAmount, attacker: attacker, api: this);
-    }
-
-    // 2. 扣血
-    final damage = target.takeDamage(finalAmount);
-    await _presenter.showDamage(target, damage);
-
-    // 3. 攻击者 Buff 造成伤害后钩子
-    if (attacker != null) {
-      for (final buff in attacker.buffs) {
-        await buff.onDamageDealt(attacker, target, damage, api: this);
-      }
-    }
-
-    if (target.isDead) {
-      await _handleUnitDeath(target);
-    }
-  }
-
-  @override
-  Future<void> healUnit(UnitState target, int amount) async {
-    final healed = target.heal(amount);
-    if (healed > 0) {
-      await _presenter.showHeal(target, healed);
-    }
-  }
-
-  @override
-  Future<void> addBuff(UnitState target, Buff buff) async {
-    target.addBuff(buff);
-    await _presenter.showBuffApplied(target, buff);
-  }
-
-  @override
-  Future<void> removeBuff(UnitState target, Buff buff) async {
-    target.removeBuff(buff);
-    await _presenter.showBuffRemoved(target, buff);
-  }
-
-  @override
   Future<void> displaceUnit(UnitState unit, Position target) async {
     final startX = unit.x;
     final startY = unit.y;
 
-    unit.x = target.x;
-    unit.y = target.y;
+    board.turnManager.updateUnitPosition(unit, target.x, target.y);
 
     final unitComponent = board.unitLayer.getUnitAt(startX, startY);
     if (unitComponent != null) {
@@ -268,7 +229,7 @@ class BattleController extends Component implements BattleAPI, TurnDelegate {
 
   @override
   Future<void> onBuffTurnStart(UnitState unit) async {
-    for (final buff in unit.buffs) {
+    for (final buff in List.of(unit.buffs)) {
       await buff.onTurnStart(unit, api: this);
     }
   }
@@ -276,7 +237,7 @@ class BattleController extends Component implements BattleAPI, TurnDelegate {
   @override
   Future<void> onBuffTurnEnd(UnitState unit) async {
     final expiredBuffs = <Buff>[];
-    for (final buff in unit.buffs) {
+    for (final buff in List.of(unit.buffs)) {
       if (await buff.onTurnEnd(unit, api: this)) expiredBuffs.add(buff);
     }
     for (final buff in expiredBuffs) {
@@ -383,15 +344,9 @@ class BattleController extends Component implements BattleAPI, TurnDelegate {
       final skill = source.state.focusSkill;
       final target = (x: cell.gridX, y: cell.gridY);
 
-      if (!source.state.canUse(skill)) return;
-
       _locked = true;
       try {
-        final executed = await skill.onTap(source.state, target, this);
-        if (executed) {
-          if (skill.cost > 0) source.state.spendAp(skill.cost);
-          source.state.recordSkill(skill);
-        }
+        await executeSkill(source.state, skill, target);
       } finally {
         _locked = false;
       }

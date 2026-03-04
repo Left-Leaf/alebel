@@ -1,3 +1,4 @@
+import '../skills/skill.dart';
 import '../map/board.dart';
 import '../unit/unit_state.dart';
 import 'ai_action.dart';
@@ -25,9 +26,12 @@ class AggressiveAI extends AIStrategy {
     final target = _findNearestEnemy(unit, ctx);
     if (target == null) return actions;
 
+    // 找到攻击技能
+    final attackSkill = unit.unit.skills.whereType<AttackSkill>().firstOrNull;
+
     // 2. 若已在攻击范围 → 攻击
-    if (_isInAttackRange(unit, target)) {
-      actions.add(AIAttack(target: target, attackPower: unit.currentAttack));
+    if (_isInAttackRange(unit, target) && attackSkill != null) {
+      actions.add(AIUseSkill(skill: attackSkill, target: (x: target.x, y: target.y)));
       return actions;
     }
 
@@ -60,10 +64,12 @@ class AggressiveAI extends AIStrategy {
     }
 
     // 5. 移动后再次检查攻击范围
-    final endPos = bestPath != null ? bestPath.last : (x: unit.x, y: unit.y);
-    final distAfterMove = _manhattan(endPos.x, endPos.y, target.x, target.y);
-    if (distAfterMove <= unit.unit.attackRange) {
-      actions.add(AIAttack(target: target, attackPower: unit.currentAttack));
+    if (attackSkill != null) {
+      final endPos = bestPath != null ? bestPath.last : (x: unit.x, y: unit.y);
+      final distAfterMove = _manhattan(endPos.x, endPos.y, target.x, target.y);
+      if (distAfterMove <= unit.unit.attackRange) {
+        actions.add(AIUseSkill(skill: attackSkill, target: (x: target.x, y: target.y)));
+      }
     }
 
     return actions;
@@ -74,7 +80,7 @@ class AggressiveAI extends AIStrategy {
     int minDist = 999999;
 
     for (final u in ctx.units) {
-      if (u.unit.faction != unit.unit.faction) {
+      if (unit.unit.faction.isHostileTo(u.unit.faction)) {
         final dist = _manhattan(unit.x, unit.y, u.x, u.y);
         if (dist < minDist) {
           minDist = dist;

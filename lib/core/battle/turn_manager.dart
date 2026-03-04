@@ -1,4 +1,5 @@
 import '../../common/constants.dart';
+import '../map/board.dart';
 import '../unit/unit_state.dart';
 import 'turn_delegate.dart';
 
@@ -6,6 +7,7 @@ const double maxActionGauge = GameConstants.maxActionGauge;
 
 class TurnManager {
   final List<UnitState> _units = [];
+  final Map<Position, UnitState> _positionIndex = {};
 
   // 行动队列 (当前已满的单位)
   final List<UnitState> _actionQueue = [];
@@ -21,17 +23,22 @@ class TurnManager {
 
   TurnManager();
 
-  /// 根据坐标查找战斗单位（供 SkillContext 使用）
-  UnitState? getUnitAt(int x, int y) {
-    for (final unit in _units) {
-      if (unit.x == x && unit.y == y) return unit;
-    }
-    return null;
+  /// 根据坐标查找战斗单位（O(1) 空间索引查询）
+  UnitState? getUnitAt(int x, int y) => _positionIndex[(x: x, y: y)];
+
+  /// 更新单位位置并维护空间索引
+  void updateUnitPosition(UnitState unit, int newX, int newY) {
+    final oldPos = (x: unit.x, y: unit.y);
+    if (_positionIndex[oldPos] == unit) _positionIndex.remove(oldPos);
+    unit.x = newX;
+    unit.y = newY;
+    _positionIndex[(x: newX, y: newY)] = unit;
   }
 
   void registerUnit(UnitState unit) {
     if (!_units.contains(unit)) {
       _units.add(unit);
+      _positionIndex[(x: unit.x, y: unit.y)] = unit;
       // 初始随机化一点ATB，防止同速完全同步
       unit.actionGauge = (unit.currentSpeed * 5).toDouble().clamp(0, maxActionGauge * 0.5);
     }
@@ -40,14 +47,16 @@ class TurnManager {
   Future<void> removeUnit(UnitState unit) async {
     _units.remove(unit);
     _actionQueue.remove(unit);
+    final pos = (x: unit.x, y: unit.y);
+    if (_positionIndex[pos] == unit) _positionIndex.remove(pos);
     if (_activeUnit == unit) {
       _activeUnit = null;
-      await _tick(); // 当前行动单位移除，继续跑条
+      await _advanceTurn();
     }
   }
 
   Future<void> startBattle() async {
-    await _tick();
+    await _advanceTurn();
   }
 
   /// 结束当前单位的回合
@@ -67,24 +76,51 @@ class TurnManager {
       _activeUnit = null;
     }
 
-    // 检查队列或继续跑条
-    if (_actionQueue.isNotEmpty) {
-      await _startUnitTurn(_actionQueue.removeAt(0));
-    } else {
-      await _tick();
+    await _advanceTurn();
+  }
+
+  /// 迭代式回合推进：填充行动队列 → 取出下一个单位 → 开始回合。
+  ///
+  /// 如果单位在回合开始阶段（buff/cell 效果）死亡，
+  /// 循环继续取下一个单位，避免递归调用栈增长。
+  Future<void> _advanceTurn() async {
+    while (true) {
+      // 1. 确保行动队列有单位
+      if (_actionQueue.isEmpty) {
+        _fillActionQueue();
+      }
+      if (_actionQueue.isEmpty) break; // 全员 0 速或无单位
+
+      // 2. 取出下一个行动单位（跳过已死亡的）
+      final unit = _actionQueue.removeAt(0);
+      if (unit.isDead) continue;
+      _activeUnit = unit;
+
+      // 3. 回合初始化
+      unit.beginTurnRecord();
+
+      // 4. 处理 Buff / Cell 回合开始效果
+      await delegate?.onBuffTurnStart(unit);
+      await delegate?.onCellTurnStart(unit);
+
+      // 5. 效果可能致死（如毒），检查死亡后继续循环取下一个
+      if (unit.isDead) {
+        _activeUnit = null;
+        await delegate?.onUnitDeath(unit);
+        continue; // 迭代取下一个，不递归
+      }
+
+      // 6. 正常开始回合（玩家交互或 AI 执行）
+      await delegate?.onTurnStart(unit);
+      break; // 回合已开始，等待 endTurn() 被调用
     }
   }
 
-  // ATB 推进逻辑
-  Future<void> _tick() async {
-    // 如果已有行动队列，直接取出执行
-    if (_actionQueue.isNotEmpty) {
-      await _startUnitTurn(_actionQueue.removeAt(0));
-      return;
-    }
+  /// 推进 ATB 时间直到至少一个单位行动槽满，填入 _actionQueue。
+  void _fillActionQueue() {
+    if (_units.isEmpty) return;
 
-    // 模拟时间推进，直到至少有一个单位行动槽满
-    while (_actionQueue.isEmpty && _units.isNotEmpty) {
+    while (_actionQueue.isEmpty) {
       // 找出距离满槽最近的时间差
       double minTickToFull = double.infinity;
 
@@ -101,24 +137,19 @@ class TurnManager {
 
       // 推进时间
       for (final unit in _units) {
-         unit.actionGauge += unit.currentSpeed * minTickToFull;
+        unit.actionGauge += unit.currentSpeed * minTickToFull;
 
-         // 修正浮点误差，允许微小溢出
-         if (unit.actionGauge >= maxActionGauge - 0.001) {
-           unit.actionGauge = maxActionGauge;
-           if (!_actionQueue.contains(unit)) {
-             _actionQueue.add(unit);
-           }
-         }
+        // 修正浮点误差，允许微小溢出
+        if (unit.actionGauge >= maxActionGauge - 0.001) {
+          unit.actionGauge = maxActionGauge;
+          if (!_actionQueue.contains(unit)) {
+            _actionQueue.add(unit);
+          }
+        }
       }
 
-      // 按溢出量/速度排序，处理同帧满的情况 (速度快的优先，或溢出多的优先)
-      // 这里简单处理：速度快的优先
+      // 按速度排序，处理同帧满的情况（速度快的优先）
       _actionQueue.sort((a, b) => b.currentSpeed.compareTo(a.currentSpeed));
-    }
-
-    if (_actionQueue.isNotEmpty) {
-      await _startUnitTurn(_actionQueue.removeAt(0));
     }
   }
 
@@ -195,33 +226,5 @@ class TurnManager {
     }
 
     return result.take(count).toList();
-  }
-
-  Future<void> _startUnitTurn(UnitState unit) async {
-    _activeUnit = unit;
-
-    // 记录新回合
-    unit.beginTurnRecord();
-
-    // 处理 Buff 回合开始
-    await delegate?.onBuffTurnStart(unit);
-
-    // 处理 Cell 回合开始效果
-    await delegate?.onCellTurnStart(unit);
-
-    // Buff / Cell 可能造成伤害（如毒），检查死亡
-    if (unit.isDead) {
-      _activeUnit = null;
-      await delegate?.onUnitDeath(unit);
-      // 继续下一个单位
-      if (_actionQueue.isNotEmpty) {
-        await _startUnitTurn(_actionQueue.removeAt(0));
-      } else {
-        await _tick();
-      }
-      return;
-    }
-
-    await delegate?.onTurnStart(unit);
   }
 }

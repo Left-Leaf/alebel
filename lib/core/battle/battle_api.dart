@@ -55,4 +55,12 @@ abstract class BattleAPI {
 
   /// 强制位移单位到目标位置（无路径、不扣 AP，用于击退/传送等效果）
   Future<void> displaceUnit(UnitState unit, Position target);
+
+  /// 统一执行技能：检查可用性 → 调用 onTap → 扣 AP → 记录使用
+  ///
+  /// 玩家点击和 AI 行动共用此路径，确保 AP 消耗、冷却、
+  /// 使用次数等约束一致。
+  /// [skill.cost] 是技能自身的固定 AP 消耗（如 MoveSkill.cost=0，
+  /// 因为移动的 AP 消耗按步扣减在 moveUnit 中处理）。
+  Future<bool> executeSkill(UnitState unit, Skill skill, Position target);
 }

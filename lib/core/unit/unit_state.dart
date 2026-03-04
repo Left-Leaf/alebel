@@ -96,6 +96,9 @@ class UnitState
 
     // 4. Clamp state
     clampHp();
+    if (currentActionPoints > maxActionPoints) {
+      currentActionPoints = maxActionPoints;
+    }
   }
 
   /// 综合判断技能是否可用：AP 足够 + 冷却结束 + 次数未满

@@ -51,21 +51,29 @@ class GameMap implements BoardImpl {
   }
 
   /// 方便的工厂方法：创建一个默认的标准地图
-  factory GameMap.standard(CellRegistry registry) {
-    const size = GameConstants.standardMapSize;
-    const border = GameConstants.standardMapBorder;
+  ///
+  /// [generator] 可选的地图生成函数，接收 (x, y, size, border) 返回 Cell ID。
+  /// 默认生成外围墙壁 + 空白内部。
+  factory GameMap.standard(
+    CellRegistry registry, {
+    int size = GameConstants.standardMapSize,
+    int border = GameConstants.standardMapBorder,
+    int Function(int x, int y, int size, int border)? generator,
+  }) {
+    final gen = generator ?? _defaultGenerator;
     final matrix = List.generate(
       size,
-      (y) => List.generate(size, (x) {
-        // 外围边界 (Wall)
-        if (x < border || x >= size - border || y < border || y >= size - border) return 1;
-        // 内部障碍
-        if (x == 10 && y >= 10 && y <= 15) return 1;
-        if (x == 20 && y == 20) return 2;
-        return 0;
-      }),
+      (y) => List.generate(size, (x) => gen(x, y, size, border)),
     );
     return GameMap.fromMatrix(matrix, registry);
+  }
+
+  /// 默认地图生成器：外围墙壁，内部空地
+  static int _defaultGenerator(int x, int y, int size, int border) {
+    if (x < border || x >= size - border || y < border || y >= size - border) {
+      return 1; // Wall
+    }
+    return 0; // Ground
   }
 
   /// 更新迷雾状态

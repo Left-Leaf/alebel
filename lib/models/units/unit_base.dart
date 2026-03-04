@@ -6,7 +6,14 @@ enum UnitFaction {
   player,
   enemy,
   ally,
-  neutral,
+  neutral;
+
+  /// 判断本阵营是否与 [other] 敌对
+  bool isHostileTo(UnitFaction other) => switch ((this, other)) {
+    (player, enemy) || (enemy, player) => true,
+    (ally, enemy) || (enemy, ally) => true,
+    _ => false,
+  };
 }
 
 abstract class Unit {

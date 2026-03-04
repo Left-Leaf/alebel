@@ -175,4 +175,50 @@ void main() {
       expect(map.isCellKnown(1, 1), isTrue);
     });
   });
+
+  group('GameMap.standard', () {
+    test('creates map with specified size', () {
+      final registry = CellRegistry();
+      registry.register({0: const GroundCell(), 1: const WallCell()});
+      final map = GameMap.standard(registry, size: 10, border: 1);
+
+      expect(map.width, equals(10));
+      expect(map.height, equals(10));
+    });
+
+    test('default generator creates wall border and ground interior', () {
+      final registry = CellRegistry();
+      registry.register({0: const GroundCell(), 1: const WallCell()});
+      final map = GameMap.standard(registry, size: 6, border: 1);
+
+      // Border cells should be walls
+      expect(map.getCell(0, 0).cell, isA<WallCell>());
+      expect(map.getCell(5, 0).cell, isA<WallCell>());
+      expect(map.getCell(0, 5).cell, isA<WallCell>());
+
+      // Interior cells should be ground
+      expect(map.getCell(2, 2).cell, isA<GroundCell>());
+      expect(map.getCell(3, 3).cell, isA<GroundCell>());
+    });
+
+    test('custom generator overrides default', () {
+      final registry = CellRegistry();
+      registry.register({
+        0: const GroundCell(),
+        1: const WallCell(),
+        2: const WaterCell(),
+      });
+
+      final map = GameMap.standard(
+        registry,
+        size: 4,
+        border: 0,
+        generator: (x, y, size, border) => 2,
+      );
+
+      expect(map.getCell(0, 0).cell, isA<WaterCell>());
+      expect(map.getCell(1, 1).cell, isA<WaterCell>());
+      expect(map.getCell(3, 3).cell, isA<WaterCell>());
+    });
+  });
 }

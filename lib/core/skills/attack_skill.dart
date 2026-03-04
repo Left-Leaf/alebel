@@ -26,7 +26,7 @@ class AttackSkill extends Skill {
     if (api.activeUnit != state) return false;
 
     final targetUnit = api.getUnitAt(target.x, target.y);
-    if (targetUnit == null || targetUnit.unit.faction == state.unit.faction) {
+    if (targetUnit == null || !state.unit.faction.isHostileTo(targetUnit.unit.faction)) {
       return false;
     }
 
