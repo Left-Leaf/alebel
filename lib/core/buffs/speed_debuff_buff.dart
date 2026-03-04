@@ -1,4 +1,5 @@
-part of 'buff.dart';
+import '../unit/unit_state.dart';
+import 'buff.dart';
 
 class SpeedDebuffBuff extends Buff {
   final int speedReduction;

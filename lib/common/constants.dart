@@ -27,6 +27,15 @@ abstract final class GameConstants {
   // 探索模式
   static const double explorationMoveInterval = 0.15;
 
+  // 飘字效果
+  static const double floatDuration = 0.8;
+  static const double floatDistance = 30.0;
+  static const double floatFadeDelay = 0.2;
+
+  // 胜负大字
+  static const double battleEndFadeDuration = 0.5;
+  static const double battleEndDisplayDuration = 2.0;
+
   // 地图默认值
   static const int standardMapSize = 40;
   static const int standardMapBorder = 2;

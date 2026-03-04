@@ -1,7 +1,12 @@
+import 'dart:ui' as ui;
+
 import 'package:flame/components.dart';
+import 'package:flame/effects.dart';
 import 'package:flame/events.dart';
 import 'package:flutter/material.dart';
 
+import '../../common/constants.dart';
+import '../../common/theme.dart';
 import '../../core/game_mode.dart';
 import '../../core/skills/skill.dart';
 import '../../game/alebel_game.dart';
@@ -206,6 +211,7 @@ class SkillButton extends PositionComponent with TapCallbacks, HasGameReference<
   @override
   void onTapDown(TapDownEvent event) {
     if (game.mode != GameMode.battle) return;
+    if (game.board.isLocked) return;
 
     final focusUnit = game.board.focusUnit;
     if (focusUnit == null) return;
@@ -255,7 +261,7 @@ class EndTurnButton extends PositionComponent with TapCallbacks, HasGameReferenc
   void onTapDown(TapDownEvent event) {
     if (game.mode != GameMode.battle) return;
 
-    game.board.turnManager.endTurn();
+    game.board.endTurn();
     event.handled = true;
   }
 }
@@ -296,5 +302,66 @@ class DebugModeButton extends PositionComponent
       game.startTransitionToExploration();
     }
     event.handled = true;
+  }
+}
+
+/// 战斗结束时的胜负大字覆层。
+///
+/// 淡入 → 停留 → 淡出后自移除。
+class BattleEndOverlay extends PositionComponent with HasPaint {
+  final bool playerWon;
+  final Vector2 viewportSize;
+
+  BattleEndOverlay({required this.playerWon, required this.viewportSize}) {
+    position = Vector2(viewportSize.x / 2, viewportSize.y / 2);
+  }
+
+  @override
+  Future<void> onLoad() async {
+    opacity = 0;
+
+    // 淡入
+    add(OpacityEffect.to(
+      1.0,
+      EffectController(duration: GameConstants.battleEndFadeDuration),
+    ));
+
+    // 淡出后自移除
+    add(OpacityEffect.to(
+      0.0,
+      EffectController(
+        startDelay: GameConstants.battleEndDisplayDuration,
+        duration: GameConstants.battleEndFadeDuration,
+      ),
+      onComplete: removeFromParent,
+    ));
+  }
+
+  @override
+  void render(Canvas canvas) {
+    if (opacity <= 0.01) return;
+
+    final text = playerWon ? 'VICTORY' : 'DEFEAT';
+    final color = playerWon ? AlebelTheme.victoryText : AlebelTheme.defeatText;
+
+    final shadowColor = const Color(0xFF000000).withValues(alpha: opacity);
+    final textColor = color.withValues(alpha: opacity);
+
+    final builder = ui.ParagraphBuilder(ui.ParagraphStyle(textAlign: TextAlign.center))
+      ..pushStyle(ui.TextStyle(
+        color: textColor,
+        fontSize: 48,
+        fontWeight: FontWeight.bold,
+        shadows: [
+          Shadow(blurRadius: 6, color: shadowColor, offset: const Offset(2, 2)),
+        ],
+      ))
+      ..addText(text);
+    final paragraph = builder.build()..layout(const ui.ParagraphConstraints(width: 400));
+
+    canvas.drawParagraph(
+      paragraph,
+      Offset(-paragraph.maxIntrinsicWidth / 2, -24),
+    );
   }
 }

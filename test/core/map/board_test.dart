@@ -30,6 +30,9 @@ class TestBoard implements BoardImpl {
 
   @override
   bool isCellKnown(int x, int y) => !_unknownCells.contains((x: x, y: y));
+
+  @override
+  int getMoveCost(int x, int y) => 1;
 }
 
 void main() {

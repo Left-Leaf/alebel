@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
-import 'package:flutter/material.dart' show Colors, Color;
 
 import '../common/constants.dart';
 import '../core/ai/ai_action.dart';
 import '../core/battle/battle_api.dart';
+import '../core/battle/battle_presenter.dart';
+import '../core/battle/turn_delegate.dart';
 import '../core/buffs/buff.dart';
-import '../core/events/game_event.dart';
 import '../core/map/board.dart';
 import '../core/map/game_map.dart';
 import '../core/skills/skill.dart';
@@ -22,10 +22,15 @@ import 'board_component.dart';
 ///
 /// 在进入战斗模式时加载，离开时卸载。
 /// 实现 [BattleAPI]，技能通过该接口直接执行效果和控制交互状态。
-class BattleController extends Component implements BattleAPI {
+/// 实现 [TurnDelegate]，接收 TurnManager 的回合生命周期通知。
+class BattleController extends Component implements BattleAPI, TurnDelegate {
   final BoardComponent board;
+  final BattlePresenter _presenter;
   bool _active = true;
-  final List<StreamSubscription> _eventSubscriptions = [];
+  bool _locked = false;
+
+  /// 交互是否被锁定（技能执行中、AI 行动中等）
+  bool get isLocked => _locked;
 
   // --- 焦点系统 ---
 
@@ -68,7 +73,8 @@ class BattleController extends Component implements BattleAPI {
 
   UnitComponent? _previewUnit;
 
-  BattleController({required this.board});
+  BattleController({required this.board, required BattlePresenter presenter})
+      : _presenter = presenter;
 
   // --- SkillContext (用于 getHighlightPositions) ---
 
@@ -125,18 +131,18 @@ class BattleController extends Component implements BattleAPI {
     final unitComponent = board.unitLayer.getUnitAt(unit.x, unit.y);
     if (unitComponent == null) return;
 
-    final startX = unit.x;
-    final startY = unit.y;
-
     for (int i = 1; i < path.length; i++) {
-      if (unit.currentActionPoints <= 0) break;
-
       final nextPoint = path[i];
+
+      // 计算移动消耗
+      final cellState = board.gameMap.getCell(nextPoint.x, nextPoint.y);
+      final cost = cellState.cell.moveCost;
+      if (unit.currentActionPoints < cost) break;
 
       // 逐步验证：检查下一步是否被阻挡
       if (board.gameMap.blocksPass(nextPoint.x, nextPoint.y)) break;
       final occupant = board.turnManager.getUnitAt(nextPoint.x, nextPoint.y);
-      if (occupant != null && occupant != unit) break;
+      if (occupant != null && occupant != unit && i == path.length - 1) break;
 
       // Flame 动画
       final targetPos = Vector2(
@@ -153,7 +159,7 @@ class BattleController extends Component implements BattleAPI {
           onComplete: () {
             unit.x = nextPoint.x;
             unit.y = nextPoint.y;
-            unit.currentActionPoints--;
+            unit.currentActionPoints -= cost;
             board.updateFog();
             completer.complete();
           },
@@ -161,42 +167,132 @@ class BattleController extends Component implements BattleAPI {
       );
 
       await completer.future;
+
+      // 触发 Cell 进入效果
+      await cellState.cell.onUnitEnter(unit, api: this);
+      if (unit.isDead) {
+        await _handleUnitDeath(unit);
+        break;
+      }
     }
 
     unit.previewPosition = null;
-
-    if (unit.x != startX || unit.y != startY) {
-      board.eventBus.fire(UnitMovedEvent(
-        unit: unit,
-        fromX: startX,
-        fromY: startY,
-        toX: unit.x,
-        toY: unit.y,
-      ));
-    }
   }
 
   @override
-  void damageUnit(UnitState target, int amount) {
-    final damage = target.takeDamage(amount);
-    board.eventBus.fire(UnitDamagedEvent(unit: target, damage: damage));
+  Future<void> damageUnit(UnitState target, int amount, {UnitState? attacker}) async {
+    // 1. 目标 Buff 减伤钩子
+    var finalAmount = amount;
+    for (final buff in target.buffs) {
+      finalAmount = await buff.onDamageTaken(target, finalAmount, attacker: attacker, api: this);
+    }
+
+    // 2. 扣血
+    final damage = target.takeDamage(finalAmount);
+    await _presenter.showDamage(target, damage);
+
+    // 3. 攻击者 Buff 造成伤害后钩子
+    if (attacker != null) {
+      for (final buff in attacker.buffs) {
+        await buff.onDamageDealt(attacker, target, damage, api: this);
+      }
+    }
+
     if (target.isDead) {
-      handleUnitDeath(target);
+      await _handleUnitDeath(target);
     }
   }
 
   @override
-  void healUnit(UnitState target, int amount) {
+  Future<void> healUnit(UnitState target, int amount) async {
     final healed = target.heal(amount);
     if (healed > 0) {
-      board.eventBus.fire(UnitHealedEvent(unit: target, amount: healed));
+      await _presenter.showHeal(target, healed);
     }
   }
 
   @override
-  void addBuff(UnitState target, Buff buff) {
+  Future<void> addBuff(UnitState target, Buff buff) async {
     target.addBuff(buff);
-    board.eventBus.fire(BuffAppliedEvent(unit: target, buff: buff));
+    await _presenter.showBuffApplied(target, buff);
+  }
+
+  @override
+  Future<void> removeBuff(UnitState target, Buff buff) async {
+    target.removeBuff(buff);
+    await _presenter.showBuffRemoved(target, buff);
+  }
+
+  @override
+  Future<void> displaceUnit(UnitState unit, Position target) async {
+    final startX = unit.x;
+    final startY = unit.y;
+
+    unit.x = target.x;
+    unit.y = target.y;
+
+    final unitComponent = board.unitLayer.getUnitAt(startX, startY);
+    if (unitComponent != null) {
+      unitComponent.position = Vector2(
+        (target.x + 0.5) * CellComponent.cellSize,
+        (target.y + 0.5) * CellComponent.cellSize,
+      );
+    }
+
+    board.updateFog();
+
+    final cellState = board.gameMap.getCell(target.x, target.y);
+    await cellState.cell.onUnitEnter(unit, api: this);
+    if (unit.isDead) await _handleUnitDeath(unit);
+  }
+
+  // ══════════════════════════════════════
+  // TurnDelegate 实现
+  // ══════════════════════════════════════
+
+  @override
+  Future<void> onTurnStart(UnitState unit) async {
+    if (unit.unit.faction == UnitFaction.player) {
+      focusCell = board.gridLayer.getCell(unit.x, unit.y);
+    } else {
+      await _executeAiTurn(unit);
+    }
+  }
+
+  @override
+  Future<void> onTurnEnd(UnitState unit) async {
+    if (focusUnit?.state == unit) {
+      focusCell = null;
+    }
+  }
+
+  @override
+  Future<void> onBuffTurnStart(UnitState unit) async {
+    for (final buff in unit.buffs) {
+      await buff.onTurnStart(unit, api: this);
+    }
+  }
+
+  @override
+  Future<void> onBuffTurnEnd(UnitState unit) async {
+    final expiredBuffs = <Buff>[];
+    for (final buff in unit.buffs) {
+      if (await buff.onTurnEnd(unit, api: this)) expiredBuffs.add(buff);
+    }
+    for (final buff in expiredBuffs) {
+      await removeBuff(unit, buff);
+    }
+  }
+
+  @override
+  Future<void> onCellTurnStart(UnitState unit) async {
+    final cellState = board.gameMap.getCell(unit.x, unit.y);
+    await cellState.cell.onTurnStart(unit, api: this);
+  }
+
+  @override
+  Future<void> onUnitDeath(UnitState unit) async {
+    await _handleUnitDeath(unit);
   }
 
   // ══════════════════════════════════════
@@ -204,12 +300,7 @@ class BattleController extends Component implements BattleAPI {
   // ══════════════════════════════════════
 
   void setup() {
-    _eventSubscriptions.addAll([
-      board.eventBus.on<TurnStartEvent>().listen((e) => _onUnitTurnStart(e.unit)),
-      board.eventBus.on<TurnEndEvent>().listen((e) => _onUnitTurnEnd(e.unit)),
-    ]);
-
-    board.turnManager.onUnitDeath = (unit) => handleUnitDeath(unit);
+    board.turnManager.delegate = this;
   }
 
   void cleanup() {
@@ -218,97 +309,91 @@ class BattleController extends Component implements BattleAPI {
     board.rangeLayer.clear();
     _hoveredCell = null;
 
-    for (final sub in _eventSubscriptions) {
-      sub.cancel();
-    }
-    _eventSubscriptions.clear();
-
-    board.turnManager.onUnitDeath = null;
+    board.turnManager.delegate = null;
   }
 
-  // --- 回合回调 ---
-
-  void _onUnitTurnStart(UnitState unit) {
-    if (unit.unit.faction == UnitFaction.player) {
-      focusCell = board.gridLayer.getCell(unit.x, unit.y);
-    } else {
-      _executeAiTurn(unit);
-    }
-  }
-
-  void _onUnitTurnEnd(UnitState unit) {
-    if (focusUnit?.state == unit) {
-      focusCell = null;
-    }
-  }
-
-  Future<void> _executeAiTurn(UnitState unit) async {
-    final ctx = AIContext(
-      gameMap: board.gameMap,
-      units: board.turnManager.units,
-      getUnitAt: board.turnManager.getUnitAt,
-    );
-
-    final actions = unit.unit.aiStrategy.decideTurn(unit, ctx);
-
-    for (final action in actions) {
-      await _handleAIAction(action, unit);
-    }
-
+  /// 玩家请求结束回合（UI 层应调用此方法而非直接调用 turnManager）
+  void endTurn() {
+    if (!_active || _locked) return;
     board.turnManager.endTurn();
   }
 
-  Future<void> _handleAIAction(AIAction action, UnitState unit) async {
-    switch (action) {
-      case AIMove(:final path):
-        await moveUnit(unit, path);
+  // --- AI 回合 ---
 
-      case AIAttack(:final target, :final attackPower):
-        damageUnit(target, attackPower);
+  Future<void> _executeAiTurn(UnitState unit) async {
+    _locked = true;
+    try {
+      final ctx = AIContext(
+        gameMap: board.gameMap,
+        units: board.turnManager.units,
+        getUnitAt: board.turnManager.getUnitAt,
+      );
+
+      final actions = unit.unit.aiStrategy.decideTurn(unit, ctx);
+
+      for (final action in actions) {
+        await _handleAIAction(action, unit);
+      }
+
+      await board.turnManager.endTurn();
+    } finally {
+      _locked = false;
     }
+  }
+
+  Future<void> _handleAIAction(AIAction action, UnitState unit) async {
+    await action.execute(unit, this);
   }
 
   // --- 单位死亡 / 战斗结束 ---
 
-  void handleUnitDeath(UnitState deadUnit) {
-    board.turnManager.removeUnit(deadUnit);
+  Future<void> _handleUnitDeath(UnitState deadUnit) async {
+    await board.turnManager.removeUnit(deadUnit);
     final unitComponent = board.unitLayer.getUnitAt(deadUnit.x, deadUnit.y);
     if (unitComponent != null) {
       board.unitLayer.removeUnit(unitComponent);
       if (unitComponent == board.playerUnit) board.playerUnit = null;
     }
     if (focusUnit?.state == deadUnit) focusCell = null;
-    board.eventBus.fire(UnitDeathEvent(unit: deadUnit));
+    await _presenter.showDeath(deadUnit);
     board.updateFog();
-    _checkBattleEnd();
+    await _checkBattleEnd();
   }
 
-  void _checkBattleEnd() {
+  Future<void> _checkBattleEnd() async {
     final hasPlayer = board.unitLayer.units.any((u) => u.faction == UnitFaction.player);
     final hasEnemy = board.unitLayer.units.any((u) => u.faction == UnitFaction.enemy);
     if (!hasEnemy) {
+      await _presenter.showBattleEnd(true);
       cleanup();
-      board.eventBus.fire(BattleEndEvent(playerWon: true));
       board.game.startTransitionToExploration();
     } else if (!hasPlayer) {
+      await _presenter.showBattleEnd(false);
       cleanup();
-      board.eventBus.fire(BattleEndEvent(playerWon: false));
     }
   }
 
   // --- 单元格交互 ---
 
   void onCellTap(CellComponent cell) async {
-    if (!_active) return;
+    if (!_active || _locked) return;
 
     final source = focusUnit;
     if (source != null) {
       final skill = source.state.focusSkill;
       final target = (x: cell.gridX, y: cell.gridY);
-      final executed = await skill.onTap(source.state, target, this);
-      if (executed) {
-        source.state.recordSkill(skill);
-        board.eventBus.fire(SkillExecutedEvent(caster: source.state, skill: skill));
+
+      if (!source.state.canUse(skill)) return;
+
+      _locked = true;
+      try {
+        final executed = await skill.onTap(source.state, target, this);
+        if (executed) {
+          if (skill.cost > 0) source.state.spendAp(skill.cost);
+          source.state.recordSkill(skill);
+        }
+      } finally {
+        _locked = false;
       }
     } else {
       focusCell = (focusCell == cell) ? null : cell;
@@ -338,20 +423,12 @@ class BattleController extends Component implements BattleAPI {
     if (unit != null && board.turnManager.activeUnit == unit.state) {
       final highlights = unit.state.focusSkill.getHighlightPositions(unit.state, _skillContext);
       final coloredHighlights = highlights
-          .map((h) => (x: h.pos.x, y: h.pos.y, color: _highlightColor(h.type)))
+          .map((h) => (x: h.pos.x, y: h.pos.y, color: h.color))
           .toList();
       board.rangeLayer.updateRanges(coloredHighlights);
     } else {
       board.rangeLayer.clear();
     }
-  }
-
-  static Color _highlightColor(HighlightType type) {
-    return switch (type) {
-      HighlightType.moveConfirmed => Colors.blue.withValues(alpha: 0.3),
-      HighlightType.moveUncertain => Colors.blue.withValues(alpha: 0.15),
-      HighlightType.attack => Colors.red.withValues(alpha: 0.3),
-    };
   }
 
   void updatePreviewUnit() => _updatePreviewUnit();

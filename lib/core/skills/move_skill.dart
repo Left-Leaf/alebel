@@ -4,32 +4,21 @@ class MoveSkill extends Skill {
   @override
   String get name => 'Move';
 
-  List<(List<Position>, PathCertainty)> _currentPaths = [];
-  Position? _lastCalcPos;
-  int? _lastPoints;
+  @override
+  int get maxUsesPerTurn => 1;
 
-  void _ensurePaths(UnitState state, GameMap gameMap) {
-    final startPos = (x: state.x, y: state.y);
-    final points = state.currentActionPoints;
-    if (_lastCalcPos?.x != state.x ||
-        _lastCalcPos?.y != state.y ||
-        _lastPoints != points ||
-        _currentPaths.isEmpty) {
-      _currentPaths = gameMap.getMovablePositions(startPos, points);
-      _lastCalcPos = startPos;
-      _lastPoints = points;
-    }
+  static List<(List<Position>, PathCertainty)> _calcPaths(UnitState state, GameMap gameMap) {
+    return gameMap.getMovablePositions((x: state.x, y: state.y), state.currentActionPoints);
   }
 
   @override
-  List<({Position pos, HighlightType type})> getHighlightPositions(
+  List<({Position pos, Color color})> getHighlightPositions(
       UnitState state, SkillContext ctx) {
-    final highlights = <({Position pos, HighlightType type})>[];
-
-    _ensurePaths(state, ctx.gameMap);
+    final highlights = <({Position pos, Color color})>[];
+    final paths = _calcPaths(state, ctx.gameMap);
 
     final cellCertainty = <Position, PathCertainty>{};
-    for (final (path, certainty) in _currentPaths) {
+    for (final (path, certainty) in paths) {
       for (final pos in path) {
         final existing = cellCertainty[pos];
         if (existing == null || certainty == PathCertainty.confirmed) {
@@ -42,9 +31,9 @@ class MoveSkill extends Skill {
     for (final entry in cellCertainty.entries) {
       highlights.add((
         pos: entry.key,
-        type: entry.value == PathCertainty.confirmed
-            ? HighlightType.moveConfirmed
-            : HighlightType.moveUncertain,
+        color: entry.value == PathCertainty.confirmed
+            ? AlebelTheme.highlightMoveConfirmed
+            : AlebelTheme.highlightMoveUncertain,
       ));
     }
 
@@ -55,7 +44,7 @@ class MoveSkill extends Skill {
       );
 
       for (final pos in attackablePositions) {
-        highlights.add((pos: pos, type: HighlightType.attack));
+        highlights.add((pos: pos, color: AlebelTheme.highlightAttack));
       }
     }
 
@@ -69,9 +58,10 @@ class MoveSkill extends Skill {
       return false;
     }
 
-    _ensurePaths(state, api.gameMap);
+    final paths = _calcPaths(state, api.gameMap);
 
-    if (!_isReachable(target)) {
+    final reachablePath = _findPath(paths, target);
+    if (reachablePath == null) {
       api.setFocus(target);
       return false;
     }
@@ -95,14 +85,10 @@ class MoveSkill extends Skill {
     if (state.previewPosition?.x == target.x &&
         state.previewPosition?.y == target.y) {
       // 第二次点击同一位置 → 确认移动
-      final path = _findPath(target);
-      if (path != null) {
-        api.setFocus(null);
-        await api.moveUnit(state, path);
-        api.setFocus((x: state.x, y: state.y));
-        return true;
-      }
-      return false;
+      api.setFocus(null);
+      await api.moveUnit(state, reachablePath);
+      api.setFocus((x: state.x, y: state.y));
+      return true;
     }
 
     // 第一次点击 → 预览
@@ -110,18 +96,9 @@ class MoveSkill extends Skill {
     return false;
   }
 
-  bool _isReachable(Position pos) {
-    for (final (path, _) in _currentPaths) {
-      if (path.isNotEmpty) {
-        final end = path.last;
-        if (end.x == pos.x && end.y == pos.y) return true;
-      }
-    }
-    return false;
-  }
-
-  List<Position>? _findPath(Position target) {
-    for (final (p, _) in _currentPaths) {
+  static List<Position>? _findPath(
+      List<(List<Position>, PathCertainty)> paths, Position target) {
+    for (final (p, _) in paths) {
       if (p.isNotEmpty && p.last.x == target.x && p.last.y == target.y) {
         return p;
       }

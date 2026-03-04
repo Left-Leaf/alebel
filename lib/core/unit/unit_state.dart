@@ -97,4 +97,12 @@ class UnitState
     // 4. Clamp state
     clampHp();
   }
+
+  /// 综合判断技能是否可用：AP 足够 + 冷却结束 + 次数未满
+  bool canUse(Skill skill) {
+    if (skill.cost > 0 && currentActionPoints < skill.cost) return false;
+    if (skill.cooldown > 0 && remainingCooldown(skill) > 0) return false;
+    if (skill.maxUsesPerTurn >= 0 && usesThisTurn(skill) >= skill.maxUsesPerTurn) return false;
+    return true;
+  }
 }

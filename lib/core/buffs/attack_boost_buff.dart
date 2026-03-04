@@ -1,4 +1,5 @@
-part of 'buff.dart';
+import '../unit/unit_state.dart';
+import 'buff.dart';
 
 class AttackBoostBuff extends Buff {
   final int bonusAttack;

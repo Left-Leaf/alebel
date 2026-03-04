@@ -5,7 +5,10 @@ class AttackSkill extends Skill {
   String get name => 'Attack';
 
   @override
-  List<({Position pos, HighlightType type})> getHighlightPositions(
+  int get maxUsesPerTurn => 1;
+
+  @override
+  List<({Position pos, Color color})> getHighlightPositions(
     UnitState state,
     SkillContext ctx,
   ) {
@@ -15,7 +18,7 @@ class AttackSkill extends Skill {
       mapWidth: ctx.gameMap.width,
       mapHeight: ctx.gameMap.height,
     );
-    return positions.map((pos) => (pos: pos, type: HighlightType.attack)).toList();
+    return positions.map((pos) => (pos: pos, color: AlebelTheme.highlightAttack)).toList();
   }
 
   @override
@@ -33,7 +36,7 @@ class AttackSkill extends Skill {
     final distance = (target.x - state.x).abs() + (target.y - state.y).abs();
     if (distance > state.unit.attackRange) return false;
 
-    api.damageUnit(targetUnit, state.currentAttack);
+    await api.damageUnit(targetUnit, state.currentAttack, attacker: state);
     api.switchSkill(state, state.unit.moveSkill);
     return true;
   }

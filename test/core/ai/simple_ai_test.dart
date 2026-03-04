@@ -116,4 +116,6 @@ class _TestBoard implements BoardImpl {
   bool canStand(int x, int y) => true;
   @override
   bool isCellKnown(int x, int y) => true;
+  @override
+  int getMoveCost(int x, int y) => 1;
 }

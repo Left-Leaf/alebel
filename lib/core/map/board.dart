@@ -1,7 +1,11 @@
+import 'dart:collection';
+
 typedef Position = ({int x, int y});
 typedef VisionState = ({Position position, bool center, bool edge});
 
 enum PathCertainty { confirmed, uncertain }
+
+const _dirs = [(0, -1), (0, 1), (-1, 0), (1, 0)];
 
 abstract class BoardImpl {
   int get width;
@@ -15,60 +19,74 @@ abstract class BoardImpl {
   bool canStand(int x, int y);
 
   bool isCellKnown(int x, int y);
+
+  /// 获取指定位置的移动消耗
+  int getMoveCost(int x, int y);
 }
 
 extension BoardExtension on BoardImpl {
   /// 计算所有可移动位置
+  ///
+  /// 使用 SPFA（BFS + 松弛）搜索，通过 cameFrom 父指针记录路径，
+  /// 仅在搜索结束后为可停留的终点重建完整路径。
   List<(List<Position>, PathCertainty)> getMovablePositions(Position position, int power) {
-    List<(List<Position>, PathCertainty)> paths = [];
-    final queue = <(Position, List<Position>, bool)>[];
-    final visited = <Position>{};
+    final bestCost = <Position, int>{position: 0};
+    final cameFrom = <Position, Position>{};
+    final uncertain = <Position, bool>{position: false};
+    final queue = Queue<(Position, int)>();
 
-    // Initial state
-    queue.add((position, [position], false));
-    visited.add(position);
-    paths.add(([position], PathCertainty.confirmed));
+    queue.add((position, 0));
 
     while (queue.isNotEmpty) {
-      final (current, path, hasUnknown) = queue.removeAt(0);
+      final (current, cost) = queue.removeFirst();
 
-      // If we have reached max power, we cannot extend further
-      if (path.length - 1 >= power) continue;
+      // 跳过已被更优路径取代的旧队列条目
+      if (bestCost[current]! < cost) continue;
+      if (cost >= power) continue;
 
-      final directions = [(x: 0, y: -1), (x: 0, y: 1), (x: -1, y: 0), (x: 1, y: 0)];
+      for (final (dx, dy) in _dirs) {
+        final nextX = current.x + dx;
+        final nextY = current.y + dy;
 
-      for (final dir in directions) {
-        final nextX = current.x + dir.x;
-        final nextY = current.y + dir.y;
-
-        // Check bounds
-        if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) {
-          continue;
-        }
-
-        // Check obstacles
+        if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) continue;
         if (blocksPass(nextX, nextY)) continue;
 
         final nextPos = (x: nextX, y: nextY);
+        final nextCost = cost + getMoveCost(nextX, nextY);
 
-        if (!visited.contains(nextPos)) {
-          visited.add(nextPos);
-          final newPath = List<Position>.from(path)..add(nextPos);
-          final nextUnknown = hasUnknown || !isCellKnown(nextX, nextY);
-          final certainty = nextUnknown ? PathCertainty.uncertain : PathCertainty.confirmed;
+        if (nextCost > power) continue;
 
-          // Check if standable (can stop here)
-          if (canStand(nextX, nextY)) {
-            paths.add((newPath, certainty));
-          }
-
-          // Add to queue to continue searching
-          queue.add((nextPos, newPath, nextUnknown));
+        final prevCost = bestCost[nextPos];
+        if (prevCost == null || nextCost < prevCost) {
+          bestCost[nextPos] = nextCost;
+          cameFrom[nextPos] = current;
+          uncertain[nextPos] = uncertain[current]! || !isCellKnown(nextX, nextY);
+          queue.add((nextPos, nextCost));
         }
       }
     }
 
-    return paths;
+    // 仅为可停留的终点重建路径
+    final results = <(List<Position>, PathCertainty)>[];
+    results.add(([position], PathCertainty.confirmed));
+
+    for (final pos in bestCost.keys) {
+      if (pos == position) continue;
+      if (!canStand(pos.x, pos.y)) continue;
+
+      final reversePath = <Position>[pos];
+      var cur = pos;
+      while (cur != position) {
+        cur = cameFrom[cur]!;
+        reversePath.add(cur);
+      }
+
+      final path = reversePath.reversed.toList();
+      final certainty = uncertain[pos]! ? PathCertainty.uncertain : PathCertainty.confirmed;
+      results.add((path, certainty));
+    }
+
+    return results;
   }
 
   /// 计算所有可见位置

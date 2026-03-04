@@ -1,3 +1,6 @@
+import 'dart:ui';
+
+import '../../common/theme.dart';
 import '../battle/battle_api.dart';
 import '../map/board.dart';
 import '../map/game_map.dart';
@@ -15,18 +18,24 @@ class SkillContext {
   const SkillContext({required this.gameMap, required this.activeUnit, required this.getUnitAt});
 }
 
-/// 高亮类型（由 presentation 层映射为具体颜色）
-enum HighlightType { moveConfirmed, moveUncertain, attack }
-
 abstract class Skill {
   String get name;
+
+  /// AP 消耗（0 = 免费）
+  int get cost => 0;
+
+  /// 使用后冷却回合数（0 = 无冷却）
+  int get cooldown => 0;
+
+  /// 每回合最大使用次数（-1 = 无限制）
+  int get maxUsesPerTurn => -1;
 
   /// 处理点击事件，通过 [api] 直接执行效果和控制交互状态。
   /// 返回 true 表示技能执行了实际动作（需记录），false 表示仅交互变更。
   Future<bool> onTap(UnitState state, Position target, BattleAPI api);
 
-  /// 返回高亮位置 + 类型（不含 Color）
-  List<({Position pos, HighlightType type})> getHighlightPositions(
+  /// 返回高亮位置 + 颜色
+  List<({Position pos, Color color})> getHighlightPositions(
     UnitState state,
     SkillContext ctx,
   );

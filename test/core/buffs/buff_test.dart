@@ -23,26 +23,26 @@ UnitState _makeUnit({
 
 void main() {
   group('PoisonBuff', () {
-    test('deals damage on turn start', () {
+    test('deals damage on turn start', () async {
       final u = _makeUnit(maxHp: 100);
       final poison = PoisonBuff(damagePerTurn: 15, duration: 3);
 
       u.addBuff(poison);
-      poison.onTurnStart(u);
+      await poison.onTurnStart(u);
 
       expect(u.currentHp, equals(85));
     });
 
-    test('can kill unit over multiple turns', () {
+    test('can kill unit over multiple turns', () async {
       final u = _makeUnit(maxHp: 30);
       final poison = PoisonBuff(damagePerTurn: 15, duration: 5);
       u.addBuff(poison);
 
-      poison.onTurnStart(u); // 30 - 15 = 15
+      await poison.onTurnStart(u); // 30 - 15 = 15
       expect(u.currentHp, equals(15));
       expect(u.isDead, isFalse);
 
-      poison.onTurnStart(u); // 15 - 15 = 0
+      await poison.onTurnStart(u); // 15 - 15 = 0
       expect(u.currentHp, equals(0));
       expect(u.isDead, isTrue);
     });
@@ -57,13 +57,13 @@ void main() {
       expect(u.currentSpeed, equals(10));
     });
 
-    test('expires after duration', () {
+    test('expires after duration', () async {
       final u = _makeUnit();
       final poison = PoisonBuff(damagePerTurn: 5, duration: 2);
       u.addBuff(poison);
 
-      expect(poison.onTurnEnd(u), isFalse); // duration 2 -> 1
-      expect(poison.onTurnEnd(u), isTrue); // duration 1 -> 0, expired
+      expect(await poison.onTurnEnd(u), isFalse); // duration 2 -> 1
+      expect(await poison.onTurnEnd(u), isTrue); // duration 1 -> 0, expired
     });
   });
 
@@ -87,12 +87,12 @@ void main() {
       expect(u.currentAttack, equals(10));
     });
 
-    test('expires after duration', () {
+    test('expires after duration', () async {
       final u = _makeUnit();
       final boost = AttackBoostBuff(bonusAttack: 5, duration: 1);
       u.addBuff(boost);
 
-      expect(boost.onTurnEnd(u), isTrue); // duration 1 -> 0
+      expect(await boost.onTurnEnd(u), isTrue); // duration 1 -> 0
     });
   });
 
@@ -124,13 +124,13 @@ void main() {
       expect(u.currentSpeed, equals(10));
     });
 
-    test('expires after duration', () {
+    test('expires after duration', () async {
       final u = _makeUnit();
       final debuff = SpeedDebuffBuff(speedReduction: 3, duration: 2);
       u.addBuff(debuff);
 
-      expect(debuff.onTurnEnd(u), isFalse); // 2 -> 1
-      expect(debuff.onTurnEnd(u), isTrue); // 1 -> 0
+      expect(await debuff.onTurnEnd(u), isFalse); // 2 -> 1
+      expect(await debuff.onTurnEnd(u), isTrue); // 1 -> 0
     });
   });
 }

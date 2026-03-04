@@ -1,4 +1,6 @@
 import 'dart:ui';
+import '../../core/battle/battle_api.dart';
+import '../../core/unit/unit_state.dart';
 
 part 'ground_cell.dart';
 part 'wall_cell.dart';
@@ -25,6 +27,15 @@ abstract class Cell {
     this.blocksMovement = false,
     this.canStand = true,
   });
+
+  /// 移动消耗的行动点（默认 1）
+  int get moveCost => 1;
+
+  /// 单位进入此格时调用
+  Future<void> onUnitEnter(UnitState unit, {BattleAPI? api}) async {}
+
+  /// 单位回合开始时站在此格触发
+  Future<void> onTurnStart(UnitState unit, {BattleAPI? api}) async {}
 }
 
 /// 自定义 Canvas 绘制混入

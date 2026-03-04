@@ -139,4 +139,11 @@ class GameMap implements BoardImpl {
     final cell = getCell(x, y);
     return cell.fogState != FogState.unknown;
   }
+
+  @override
+  int getMoveCost(int x, int y) {
+    final cell = getCell(x, y);
+    if (cell.fogState == FogState.unknown) return 1;
+    return cell.cell.moveCost;
+  }
 }

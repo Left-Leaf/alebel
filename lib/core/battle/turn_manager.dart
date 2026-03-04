@@ -1,8 +1,6 @@
 import '../../common/constants.dart';
-import '../buffs/buff.dart';
-import '../events/event_bus.dart';
-import '../events/game_event.dart';
 import '../unit/unit_state.dart';
+import 'turn_delegate.dart';
 
 const double maxActionGauge = GameConstants.maxActionGauge;
 
@@ -14,17 +12,14 @@ class TurnManager {
 
   UnitState? _activeUnit;
 
-  /// 事件总线（必须注入）
-  final EventBus eventBus;
-
-  // 死亡回调（buff 致死时需要同步移除单位后再继续跑条）
-  void Function(UnitState unit)? onUnitDeath;
+  /// 回合生命周期委托（由 BattleController 设置）
+  TurnDelegate? delegate;
 
   UnitState? get activeUnit => _activeUnit;
   List<UnitState> get actionQueue => List.unmodifiable(_actionQueue);
   List<UnitState> get units => List.unmodifiable(_units);
 
-  TurnManager({required this.eventBus});
+  TurnManager();
 
   /// 根据坐标查找战斗单位（供 SkillContext 使用）
   UnitState? getUnitAt(int x, int y) {
@@ -42,60 +37,49 @@ class TurnManager {
     }
   }
 
-  void removeUnit(UnitState unit) {
+  Future<void> removeUnit(UnitState unit) async {
     _units.remove(unit);
     _actionQueue.remove(unit);
     if (_activeUnit == unit) {
       _activeUnit = null;
-      _tick(); // 当前行动单位移除，继续跑条
+      await _tick(); // 当前行动单位移除，继续跑条
     }
   }
 
-  void startBattle() {
-    _tick();
+  Future<void> startBattle() async {
+    await _tick();
   }
 
   /// 结束当前单位的回合
-  void endTurn() {
+  Future<void> endTurn() async {
     if (_activeUnit != null) {
       final unit = _activeUnit!;
 
       // 处理 Buff 回合结束
-      // 收集过期的 buff
-      final expiredBuffs = <Buff>[];
-      for (final buff in unit.buffs) {
-        if (buff.onTurnEnd(unit)) {
-          expiredBuffs.add(buff);
-        }
-      }
-      // 移除过期 buff
-      for (final buff in expiredBuffs) {
-        unit.removeBuff(buff);
-        eventBus.fire(BuffRemovedEvent(unit: unit, buff: buff));
-      }
+      await delegate?.onBuffTurnEnd(unit);
 
       unit.actionGauge = 0; // 重置行动槽
 
       // 恢复行动点
       unit.recoverAp();
 
-      eventBus.fire(TurnEndEvent(unit: unit));
+      await delegate?.onTurnEnd(unit);
       _activeUnit = null;
     }
 
     // 检查队列或继续跑条
     if (_actionQueue.isNotEmpty) {
-      _startUnitTurn(_actionQueue.removeAt(0));
+      await _startUnitTurn(_actionQueue.removeAt(0));
     } else {
-      _tick();
+      await _tick();
     }
   }
 
   // ATB 推进逻辑
-  void _tick() {
+  Future<void> _tick() async {
     // 如果已有行动队列，直接取出执行
     if (_actionQueue.isNotEmpty) {
-      _startUnitTurn(_actionQueue.removeAt(0));
+      await _startUnitTurn(_actionQueue.removeAt(0));
       return;
     }
 
@@ -134,7 +118,7 @@ class TurnManager {
     }
 
     if (_actionQueue.isNotEmpty) {
-      _startUnitTurn(_actionQueue.removeAt(0));
+      await _startUnitTurn(_actionQueue.removeAt(0));
     }
   }
 
@@ -213,30 +197,31 @@ class TurnManager {
     return result.take(count).toList();
   }
 
-  void _startUnitTurn(UnitState unit) {
+  Future<void> _startUnitTurn(UnitState unit) async {
     _activeUnit = unit;
 
     // 记录新回合
     unit.beginTurnRecord();
 
     // 处理 Buff 回合开始
-    for (final buff in unit.buffs) {
-      buff.onTurnStart(unit);
-    }
+    await delegate?.onBuffTurnStart(unit);
 
-    // Buff 可能造成伤害（如毒），检查死亡
+    // 处理 Cell 回合开始效果
+    await delegate?.onCellTurnStart(unit);
+
+    // Buff / Cell 可能造成伤害（如毒），检查死亡
     if (unit.isDead) {
       _activeUnit = null;
-      onUnitDeath?.call(unit);
+      await delegate?.onUnitDeath(unit);
       // 继续下一个单位
       if (_actionQueue.isNotEmpty) {
-        _startUnitTurn(_actionQueue.removeAt(0));
+        await _startUnitTurn(_actionQueue.removeAt(0));
       } else {
-        _tick();
+        await _tick();
       }
       return;
     }
 
-    eventBus.fire(TurnStartEvent(unit: unit));
+    await delegate?.onTurnStart(unit);
   }
 }

@@ -1,9 +1,8 @@
 import 'dart:ui';
 
 import 'package:alebel/common/constants.dart';
+import 'package:alebel/core/battle/turn_delegate.dart';
 import 'package:alebel/core/battle/turn_manager.dart';
-import 'package:alebel/core/events/event_bus.dart';
-import 'package:alebel/core/events/game_event.dart';
 import 'package:alebel/core/unit/unit_state.dart';
 import 'package:alebel/models/units/basic_soldier.dart';
 import 'package:alebel/models/units/unit_base.dart';
@@ -18,14 +17,39 @@ UnitState _makeUnit({int speed = 10, UnitFaction faction = UnitFaction.player}) 
   return UnitState(unit: unit, x: 0, y: 0);
 }
 
+class _TestTurnDelegate implements TurnDelegate {
+  final List<UnitState> turnStartUnits = [];
+
+  @override
+  Future<void> onTurnStart(UnitState unit) async {
+    turnStartUnits.add(unit);
+  }
+
+  @override
+  Future<void> onTurnEnd(UnitState unit) async {}
+
+  @override
+  Future<void> onBuffTurnStart(UnitState unit) async {}
+
+  @override
+  Future<void> onBuffTurnEnd(UnitState unit) async {}
+
+  @override
+  Future<void> onCellTurnStart(UnitState unit) async {}
+
+  @override
+  Future<void> onUnitDeath(UnitState unit) async {}
+}
+
 void main() {
   group('TurnManager', () {
     late TurnManager tm;
-    late EventBus eventBus;
+    late _TestTurnDelegate delegate;
 
     setUp(() {
-      eventBus = EventBus();
-      tm = TurnManager(eventBus: eventBus);
+      tm = TurnManager();
+      delegate = _TestTurnDelegate();
+      tm.delegate = delegate;
     });
 
     test('registerUnit initializes action gauge', () {
@@ -44,7 +68,7 @@ void main() {
       expect(u.actionGauge, equals(initialGauge));
     });
 
-    test('faster unit acts first', () {
+    test('faster unit acts first', () async {
       final slow = _makeUnit(speed: 5);
       final fast = _makeUnit(speed: 20);
 
@@ -55,16 +79,11 @@ void main() {
       slow.actionGauge = 0;
       fast.actionGauge = 0;
 
-      UnitState? firstToAct;
-      eventBus.on<TurnStartEvent>().listen((e) {
-        firstToAct ??= e.unit;
-      });
-
-      tm.startBattle();
-      expect(firstToAct, equals(fast));
+      await tm.startBattle();
+      expect(delegate.turnStartUnits.first, equals(fast));
     });
 
-    test('endTurn resets gauge and recovers AP', () {
+    test('endTurn resets gauge and recovers AP', () async {
       final u1 = _makeUnit(speed: 10);
       final u2 = _makeUnit(speed: 5);
       tm.registerUnit(u1);
@@ -72,45 +91,37 @@ void main() {
       u1.actionGauge = 0;
       u2.actionGauge = 0;
 
-      // Track which units got turns
-      final turnUnits = <UnitState>[];
-      eventBus.on<TurnStartEvent>().listen((e) {
-        turnUnits.add(e.unit);
-      });
-
-      tm.startBattle();
+      await tm.startBattle();
       // First turn should be the faster unit (u1)
-      expect(turnUnits.length, equals(1));
-      expect(turnUnits.first, equals(u1));
+      expect(delegate.turnStartUnits.length, equals(1));
+      expect(delegate.turnStartUnits.first, equals(u1));
 
       // Deplete AP
       u1.currentActionPoints = 0;
 
       // End u1's turn
-      tm.endTurn();
+      await tm.endTurn();
 
       // After endTurn, u1's AP should be recovered
       expect(u1.currentActionPoints, equals(u1.recoveryActionPoints));
     });
 
-    test('removeUnit removes from tracking', () {
+    test('removeUnit removes from tracking', () async {
       final u1 = _makeUnit(speed: 10);
       final u2 = _makeUnit(speed: 10);
       tm.registerUnit(u1);
       tm.registerUnit(u2);
 
-      tm.removeUnit(u1);
+      await tm.removeUnit(u1);
 
       // Only u2 should act
-      UnitState? acted;
-      eventBus.on<TurnStartEvent>().listen((e) {
-        acted = e.unit;
-      });
-      tm.startBattle();
-      expect(acted, equals(u2));
+      delegate.turnStartUnits.clear();
+      await tm.startBattle();
+      expect(delegate.turnStartUnits.length, equals(1));
+      expect(delegate.turnStartUnits.first, equals(u2));
     });
 
-    test('getPredictedTurnOrder returns correct count', () {
+    test('getPredictedTurnOrder returns correct count', () async {
       final u1 = _makeUnit(speed: 10);
       final u2 = _makeUnit(speed: 15);
       tm.registerUnit(u1);
@@ -118,15 +129,13 @@ void main() {
       u1.actionGauge = 0;
       u2.actionGauge = 0;
 
-      // Need to consume turn start to prevent infinite recursion
-      eventBus.on<TurnStartEvent>().listen((_) {});
-      tm.startBattle();
+      await tm.startBattle();
 
       final order = tm.getPredictedTurnOrder(5);
       expect(order.length, equals(5));
     });
 
-    test('getPredictedTurnOrder favors faster unit', () {
+    test('getPredictedTurnOrder favors faster unit', () async {
       final slow = _makeUnit(speed: 5);
       final fast = _makeUnit(speed: 20);
       tm.registerUnit(slow);
@@ -134,8 +143,7 @@ void main() {
       slow.actionGauge = 0;
       fast.actionGauge = 0;
 
-      eventBus.on<TurnStartEvent>().listen((_) {});
-      tm.startBattle();
+      await tm.startBattle();
 
       final order = tm.getPredictedTurnOrder(6);
       // In 6 predicted turns, fast should appear more often

@@ -1,10 +1,11 @@
 import 'package:flame/components.dart';
-import 'package:flutter/material.dart' show Colors;
+import 'package:flutter/material.dart' show Color, Colors;
 
+import '../common/theme.dart';
+import '../core/battle/battle_presenter.dart';
 import '../core/battle/battle_scenario.dart';
 import '../core/battle/turn_manager.dart';
-import '../core/events/event_bus.dart';
-import '../core/events/game_event.dart';
+import '../core/buffs/buff.dart';
 import '../core/map/board.dart';
 import '../core/map/game_map.dart';
 import '../core/unit/unit_state.dart';
@@ -13,13 +14,16 @@ import '../models/units/unit_base.dart';
 import '../presentation/components/animatable_iso_decorator.dart';
 import '../presentation/components/cell_component.dart';
 import '../presentation/components/explorer_component.dart';
+import '../presentation/components/floating_text.dart';
 import '../presentation/components/origin_point.dart';
 import '../presentation/components/unit_component.dart';
+import '../presentation/layers/effect_layer.dart';
 import '../presentation/layers/fog_layer.dart';
 import '../presentation/layers/grid_layer.dart';
 import '../presentation/layers/range_layer.dart';
 import '../presentation/layers/unit_layer.dart';
 import '../presentation/ui/selection_overlay.dart';
+import '../presentation/ui/ui_layer.dart';
 import 'alebel_game.dart';
 import 'battle_controller.dart';
 
@@ -28,9 +32,9 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
   late final UnitLayer unitLayer;
   late final RangeLayer rangeLayer;
   late final FogLayer fogLayer;
+  late final EffectLayer effectLayer;
   late GameMap gameMap;
   late final TurnManager turnManager;
-  final EventBus eventBus = EventBus();
 
   late final AnimatableIsoDecorator _isoDecorator;
 
@@ -60,6 +64,9 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
 
   CellComponent? get hoveredCell => _battleController?.hoveredCell;
 
+  /// 交互是否被锁定（技能执行中、AI 行动中等）
+  bool get isLocked => _battleController?.isLocked ?? false;
+
   // --- 等角投影因子 ---
 
   double get isoFactor => _isoDecorator.factor;
@@ -76,7 +83,7 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _isoDecorator = AnimatableIsoDecorator(factor: 0.0);
     decorator.addLast(_isoDecorator);
 
-    turnManager = TurnManager(eventBus: eventBus);
+    turnManager = TurnManager();
     gameMap = GameMap.standard(game.cellRegistry);
 
     // 计算网格和边界的偏移量
@@ -110,6 +117,11 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
       ..position = boardOffset
       ..priority = 6;
     add(unitLayer);
+
+    effectLayer = EffectLayer()
+      ..position = boardOffset
+      ..priority = 7;
+    add(effectLayer);
 
     // 添加网格单元格 (作为逻辑实体)
     for (var x = 0; x < gameMap.width; x++) {
@@ -162,12 +174,11 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     }
 
     // 加载战斗控制器
-    _battleController = BattleController(board: this);
+    _battleController = BattleController(board: this, presenter: _createPresenter());
     add(_battleController!);
     _battleController!.setup();
 
     turnManager.startBattle();
-    eventBus.fire(BattleStartEvent());
     updateFog();
   }
 
@@ -177,6 +188,13 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
     _battleController?.cleanup();
     _battleController?.removeFromParent();
     _battleController = null;
+
+    // 清除残留飘字
+    effectLayer.removeAll(effectLayer.children.toList());
+    final uiLayer = game.camera.viewport.children.whereType<UiLayer>().firstOrNull;
+    if (uiLayer != null) {
+      uiLayer.removeAll(uiLayer.children.whereType<FloatingTextComponent>().toList());
+    }
 
     // 记录玩家最终位置和定义
     final endX = playerUnit?.gridX ?? 5;
@@ -197,6 +215,8 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
 
     updateFog();
   }
+
+  BattlePresenter _createPresenter() => _BoardBattlePresenter(board: this);
 
   UnitComponent _addUnit(int x, int y, Unit unitDef) {
     final unitState = UnitState(unit: unitDef, x: x, y: y);
@@ -225,16 +245,17 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
 
   // --- 委托方法（供 Skill 调用） ---
 
-  void handleUnitDeath(UnitState deadUnit) {
-    _battleController?.handleUnitDeath(deadUnit);
-  }
-
   void updateRangeLayer() {
     _battleController?.updateRangeLayer();
   }
 
   void updatePreviewUnit() {
     _battleController?.updatePreviewUnit();
+  }
+
+  /// 玩家请求结束回合（经 BattleController 锁检查）
+  void endTurn() {
+    _battleController?.endTurn();
   }
 
   /// 将棋盘本地坐标通过当前 iso 矩阵投影到世界坐标。
@@ -301,4 +322,92 @@ class BoardComponent extends PositionComponent with HasGameReference<AlebelGame>
   }
 
   void onCellLongPress(CellComponent cell) {}
+}
+
+/// BattlePresenter 的 presentation 层实现。
+///
+/// 计算目标单位在相机视口内的坐标，在视口空间生成飘字。
+class _BoardBattlePresenter implements BattlePresenter {
+  final BoardComponent board;
+
+  _BoardBattlePresenter({required this.board});
+
+  /// 将网格坐标转换为相机视口坐标。
+  ///
+  /// 流程：网格 → BoardComponent 局部 → iso 投影 → 世界 → 视口。
+  Vector2 _gridToViewport(int gridX, int gridY) {
+    // 网格 → BoardComponent 局部坐标（等角投影前）
+    final localInBoard = Vector2(
+      (gridX + 0.5) * CellComponent.cellSize,
+      (gridY + 0.5) * CellComponent.cellSize,
+    );
+
+    // 等角投影 → 世界坐标（board.position 默认 (0,0)）
+    final worldPos = board.projectLocal(localInBoard) + board.position;
+
+    // 世界 → 视口
+    final camera = board.game.camera;
+    final vpSize = camera.viewport.size;
+    final zoom = camera.viewfinder.zoom;
+    final vfPos = camera.viewfinder.position;
+
+    return Vector2(
+      (worldPos.x - vfPos.x) * zoom + vpSize.x / 2,
+      (worldPos.y - vfPos.y) * zoom + vpSize.y / 2,
+    );
+  }
+
+  @override
+  Future<void> showDamage(UnitState unit, int damage) async {
+    _spawnFloatingText(unit.x, unit.y, '-$damage',
+        color: AlebelTheme.damageText, fontSize: 16);
+  }
+
+  @override
+  Future<void> showHeal(UnitState unit, int amount) async {
+    _spawnFloatingText(unit.x, unit.y, '+$amount',
+        color: AlebelTheme.healText, fontSize: 16);
+  }
+
+  @override
+  Future<void> showDeath(UnitState unit) async {
+    _spawnFloatingText(unit.x, unit.y, 'DEAD',
+        color: AlebelTheme.deathText, fontSize: 18);
+  }
+
+  @override
+  Future<void> showBuffApplied(UnitState unit, Buff buff) async {
+    _spawnFloatingText(unit.x, unit.y, '+${buff.name}',
+        color: AlebelTheme.buffAppliedText, fontSize: 12, offsetY: -10);
+  }
+
+  @override
+  Future<void> showBuffRemoved(UnitState unit, Buff buff) async {
+    _spawnFloatingText(unit.x, unit.y, '-${buff.name}',
+        color: AlebelTheme.buffRemovedText, fontSize: 12, offsetY: -10);
+  }
+
+  @override
+  Future<void> showBattleEnd(bool playerWon) async {
+    final uiLayer = board.game.camera.viewport.children.whereType<UiLayer>().firstOrNull;
+    if (uiLayer != null) {
+      uiLayer.add(BattleEndOverlay(playerWon: playerWon, viewportSize: uiLayer.size));
+    }
+  }
+
+  void _spawnFloatingText(int gridX, int gridY, String text, {
+    required Color color, double fontSize = 14, double offsetY = 0,
+  }) {
+    final viewportPos = _gridToViewport(gridX, gridY);
+    // 右上角偏移
+    final position = viewportPos + Vector2(20, -20 + offsetY);
+
+    final uiLayer = board.game.camera.viewport.children.whereType<UiLayer>().firstOrNull;
+    uiLayer?.add(FloatingTextComponent(
+      text: text,
+      color: color,
+      fontSize: fontSize,
+      position: position,
+    ));
+  }
 }

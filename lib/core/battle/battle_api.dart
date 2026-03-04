@@ -40,12 +40,19 @@ abstract class BattleAPI {
   /// 沿路径移动单位（逐步动画 + 验证 + 扣 AP + 刷迷雾）
   Future<void> moveUnit(UnitState unit, List<Position> path);
 
-  /// 对目标造成伤害（扣血 + 判死亡 + 发事件 + 判胜负）
-  void damageUnit(UnitState target, int amount);
+  /// 对目标造成伤害（扣血 + 判死亡 + 判胜负）
+  /// [attacker] 可选，传入时会触发双方 Buff 的伤害钩子
+  Future<void> damageUnit(UnitState target, int amount, {UnitState? attacker});
 
   /// 治疗目标（恢复 HP）
-  void healUnit(UnitState target, int amount);
+  Future<void> healUnit(UnitState target, int amount);
 
   /// 施加 Buff（自动触发属性重算）
-  void addBuff(UnitState target, Buff buff);
+  Future<void> addBuff(UnitState target, Buff buff);
+
+  /// 移除 Buff（自动触发属性重算）
+  Future<void> removeBuff(UnitState target, Buff buff);
+
+  /// 强制位移单位到目标位置（无路径、不扣 AP，用于击退/传送等效果）
+  Future<void> displaceUnit(UnitState unit, Position target);
 }

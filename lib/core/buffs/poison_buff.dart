@@ -1,4 +1,6 @@
-part of 'buff.dart';
+import '../battle/battle_api.dart';
+import '../unit/unit_state.dart';
+import 'buff.dart';
 
 class PoisonBuff extends Buff {
   final int damagePerTurn;
@@ -20,7 +22,11 @@ class PoisonBuff extends Buff {
   }
 
   @override
-  void onTurnStart(UnitState state) {
-    state.takeDamage(damagePerTurn);
+  Future<void> onTurnStart(UnitState state, {BattleAPI? api}) async {
+    if (api != null) {
+      await api.damageUnit(state, damagePerTurn);
+    } else {
+      state.takeDamage(damagePerTurn);
+    }
   }
 }
