@@ -1,21 +1,31 @@
-import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
-import 'alpha_game.dart';
+
+import 'cell/cells.dart';
+import 'editor/editor_page.dart';
+import 'editor/editor_state.dart';
+import 'framework/map/chunk_loader.dart';
+import 'framework/map/entity_factory.dart';
+import 'framework/map/state_factory.dart';
 
 void main() {
-  runApp(const AlphaApp());
-}
+  final cellRegistry = buildPresetCellRegistry();
+  final chunkLoader = ChunkLoader(
+    cellRegistry: cellRegistry,
+    entityFactory: EntityFactory(EntityRegistry()),
+    stateFactory: StateFactory(StateRegistry()),
+  );
 
-class AlphaApp extends StatelessWidget {
-  const AlphaApp({super.key});
+  final editorState = EditorState(
+    cellRegistry: cellRegistry,
+    cellColors: presetCellColors,
+    cellImagePaths: presetCellImagePaths,
+    chunkLoader: chunkLoader,
+  );
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  runApp(
+    MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: GameWidget(game: AlphaGame()),
-      ),
-    );
-  }
+      home: EditorPage(editorState: editorState),
+    ),
+  );
 }

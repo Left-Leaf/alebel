@@ -1,32 +1,97 @@
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' show KeyEvent, KeyEventResult;
+import 'package:flutter/services.dart' show LogicalKeyboardKey, KeyDownEvent;
 
-import 'demo/camera_demo/camera_demo_scene.dart';
-import 'demo/world_demo/world_demo_scene.dart';
-import 'scene_manager.dart';
+import 'framework/scene.dart';
+
+/// 场景切换观察者
+class SceneObserver {
+  final void Function(String sceneName)? onSwitch;
+  SceneObserver({this.onSwitch});
+}
 
 /// Alpha 框架游戏入口
-class AlphaGame extends FlameGame
-    with ScrollDetector, HasKeyboardHandlerComponents {
-  late final SceneManager sceneManager;
+class AlphaGame extends FlameGame with ScrollDetector, KeyboardEvents {
+  Scene? _currentScene;
+  final Map<String, Scene Function()> _sceneFactories = {};
+  final List<String> _sceneOrder = [];
+  final List<SceneObserver> _observers = [];
 
-  @override
-  Color backgroundColor() => const Color(0xFF222222);
+  Scene? get currentScene => _currentScene;
+
+  void addObserver(SceneObserver observer) => _observers.add(observer);
+
+  void removeObserver(SceneObserver observer) => _observers.remove(observer);
+
+  static const _digitKeys = [
+    LogicalKeyboardKey.digit1,
+    LogicalKeyboardKey.digit2,
+    LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.digit4,
+    LogicalKeyboardKey.digit5,
+    LogicalKeyboardKey.digit6,
+    LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.digit8,
+    LogicalKeyboardKey.digit9,
+  ];
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    sceneManager = SceneManager();
-    world.add(sceneManager);
+  }
 
-    sceneManager.registerScene('camera_demo', CameraDemoScene.new);
-    sceneManager.registerScene('world_demo', WorldDemoScene.new);
-    await sceneManager.switchTo('camera_demo');
+  void registerScene(String name, Scene Function() factory) {
+    _sceneFactories[name] = factory;
+    if (!_sceneOrder.contains(name)) {
+      _sceneOrder.add(name);
+    }
+  }
+
+  Future<void> switchTo(String sceneName) async {
+    final factory = _sceneFactories[sceneName];
+    if (factory == null) {
+      throw Exception('Scene not found: $sceneName');
+    }
+
+    if (_currentScene != null) {
+      remove(_currentScene!);
+    }
+
+    final newScene = factory();
+    _currentScene = newScene;
+    add(newScene);
+    await newScene.loaded;
+
+    for (final observer in _observers) {
+      observer.onSwitch?.call(sceneName);
+    }
+  }
+
+  @override
+  KeyEventResult onKeyEvent(KeyEvent event, Set<LogicalKeyboardKey> keysPressed) {
+    if (event is KeyDownEvent) {
+      final idx = _digitKeys.indexOf(event.logicalKey);
+      if (idx >= 0 && idx < _sceneOrder.length) {
+        final target = _sceneOrder[idx];
+        if (_currentScene?.name != target) {
+          switchTo(target);
+        }
+        return KeyEventResult.handled;
+      }
+    }
+    final mode = currentScene?.mode;
+    if (mode != null) {
+      return mode.onKeyEvent(event, keysPressed) ? KeyEventResult.ignored : KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
   void onScroll(PointerScrollInfo info) {
-    sceneManager.onScroll(info);
+    final mode = currentScene?.mode;
+    if (mode != null) {
+      mode.onScroll(info);
+    }
   }
 }

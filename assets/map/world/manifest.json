@@ -1,0 +1,17 @@
+{
+  "name": "world",
+  "version": 1,
+  "defaultCellId": 0,
+  "createdAt": "2026-03-11T16:41:56.523322",
+  "modifiedAt": "2026-03-11T18:01:54.073977",
+  "chunks": [
+    {
+      "x": 0,
+      "y": 0
+    },
+    {
+      "x": 1,
+      "y": 0
+    }
+  ]
+}

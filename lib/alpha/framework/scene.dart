@@ -1,68 +1,49 @@
 import 'package:flame/components.dart';
-import 'package:flame/events.dart';
+import 'package:flutter/cupertino.dart';
 
+import 'camera/camera_3d_component.dart';
+import 'world.dart';
 import 'mode.dart';
-import 'scene_map.dart';
-import 'scene_state.dart';
+import 'state.dart';
 
 /// 场景 — Alpha 框架的最顶层单元。
 ///
-/// 一个场景内包含三个核心组件：
+/// 一个场景内包含四个核心部分：
+/// - [camera]：3D 相机，控制视角；世界内容添加到 viewfinder，HUD 添加到 viewport
 /// - [SceneState]：存储场景状态，为逻辑和渲染提供数据支持
-/// - [SceneMap]：地图加载、相机控制、Component 渲染
+/// - [SceneWorld]：地图加载、Component 渲染
 /// - [Mode]：规则制定、交互处理
 ///
-/// 三者在 Scene 构建时一并创建，之后不再增删。
-/// SceneState、SceneMap、Mode 均为 Scene 的直接子组件，通过 [ParentIsA] 访问所属 Scene。
+/// Scene 持有 [Camera3DComponent]，所有需要相机的子组件通过 Scene 访问。
 abstract class Scene extends Component {
   String get name;
 
-  final SceneState state;
-  final SceneMap sceneMap;
-  final Map<String, Mode> modes;
+  /// 3D 相机组件。
+  final Camera3DComponent camera = Camera3DComponent();
 
-  Mode? _currentMode;
+  SceneState get state;
 
-  Scene({required this.state, required this.sceneMap, required this.modes});
+  SceneWorld get world;
 
-  Mode? get currentMode => _currentMode;
-  String? get currentModeName => _currentMode?.modeName;
+  Mode? _mode;
 
+  Mode? get mode => _mode;
+
+  @mustCallSuper
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    add(state);
-    add(sceneMap);
-    modes.values.forEach(add);
+    await add(camera);
+    await add(state);
+    await camera.viewfinder.add(world);
   }
 
   /// 按名称切换模式
-  Future<void> switchModeTo(String modeName) async {
-    final mode = modes[modeName];
-    if (mode == null) {
-      throw Exception('Mode not found: $modeName');
-    }
-    if (_currentMode == mode) return;
-
-    if (_currentMode != null) {
-      await _currentMode!.onDeactivate();
-    }
-    _currentMode = mode;
-    await mode.onActivate();
-  }
-
-  /// 场景进入时调用
-  Future<void> onEnter() async {}
-
-  /// 场景退出时调用
-  Future<void> onExit() async {
-    if (_currentMode != null) {
-      await _currentMode!.onDeactivate();
-    }
-  }
-
-  /// 转发滚轮事件到当前激活的模式。
-  void onScroll(PointerScrollInfo info) {
-    _currentMode?.onScroll(info);
+  Future<void> switchModeTo(Mode mode) async {
+    if (_mode == mode) return;
+    _mode?.removeFromParent();
+    _mode = null;
+    await mode.addToParent(this);
+    _mode = mode;
   }
 }

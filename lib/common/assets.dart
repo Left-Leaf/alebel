@@ -1,6 +1,9 @@
 class AssetsImage {
   static const String imagePath = 'assets/images/';
+
   // static const String background = '$imagePath/background.jpg';
+
+  static const String borderTile = 'Rock060/Rock060_1K-PNG_Color.png';
 }
 
 class AssetsSound {
